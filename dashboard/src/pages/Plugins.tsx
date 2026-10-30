@@ -1167,7 +1167,6 @@ export default function Plugins() {
                 <input
                   type="file"
                   accept=".zip,application/zip"
-                  hidden
                   onChange={e => setInstallFile(e.target.files?.[0] ?? null)}
                 />
                 <Upload size={28} />
