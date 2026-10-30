@@ -899,9 +899,9 @@ Two properties to design around:
 
 **Request body** — `SubscribePresenceDto`
 
-| Field    | Type   | Required | Constraints                                                                                                    | Description                                                                           |
-| -------- | ------ | -------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `chatId` | string | Yes      | `@IsString`; `@IsNotEmpty`; `@MaxLength(255)`; `@Matches(/^[^\s@]+@[^\s@]+$/)` (localpart@host, no whitespace) | Engine-native JID, e.g. `1234567890@c.us` (wwebjs) or `1234@s.whatsapp.net` (Baileys) |
+| Field    | Type   | Required | Constraints                                                                                                    | Description                                                                               |
+| -------- | ------ | -------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `chatId` | string | Yes      | `@IsString`; `@IsNotEmpty`; `@MaxLength(255)`; `@Matches(/^[^\s@]+@[^\s@]+$/)` (localpart@host, no whitespace) | Chat ID in the neutral form the gateway returns, on either engine, e.g. `1234567890@c.us` |
 
 **Response** `200`
 
@@ -999,7 +999,7 @@ Mark a chat as read/seen.
 
 | Field        | Type     | Required | Constraints                                                                                                    | Description                                                                                                          |
 | ------------ | -------- | -------- | -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `chatId`     | string   | Yes      | `@IsString`; `@IsNotEmpty`; `@MaxLength(255)`; `@Matches(/^[^\s@]+@[^\s@]+$/)` (localpart@host, no whitespace) | Engine-native JID, e.g. `1234567890@c.us` (wwebjs) or `1234@s.whatsapp.net` (Baileys)                                |
+| `chatId`     | string   | Yes      | `@IsString`; `@IsNotEmpty`; `@MaxLength(255)`; `@Matches(/^[^\s@]+@[^\s@]+$/)` (localpart@host, no whitespace) | Chat ID in the neutral form the gateway returns, on either engine, e.g. `1234567890@c.us`                            |
 | `messageIds` | string[] | No       | `@IsArray`; `@ArrayNotEmpty`; `@ArrayMaxSize(100)`; each a non-empty token with no whitespace                  | Messages to acknowledge. Omit the field to acknowledge only the newest received message; an empty array is rejected. |
 
 Baileys acknowledges individual messages rather than chats, and the receipt enumerates ids instead of carrying a read-up-to watermark. Without `messageIds` only the newest received message gets a receipt: the one the engine holds in memory, else, for a session restarted since it arrived, the newest received message the gateway stored. A burst therefore leaves its earlier messages unread. Each supplied id is resolved through the message store, which is what carries the `participant` a group receipt needs. An id the store never held (history backfill) in a group takes its `participant` from the author the gateway stored for that message; one with no stored author is left out of the receipt, and the route answers `{ "success": false }` when none of the ids could be named. Ignored by whatsapp-web.js, whose own `sendSeen` is chat-level.
@@ -1038,9 +1038,9 @@ Mark a chat as unread.
 
 **Request body** — `MarkChatUnreadDto`
 
-| Field    | Type   | Required | Constraints                                                                    | Description                               |
-| -------- | ------ | -------- | ------------------------------------------------------------------------------ | ----------------------------------------- |
-| `chatId` | string | Yes      | `@IsString`; `@IsNotEmpty`; `@MaxLength(255)`; `@Matches(/^[^\s@]+@[^\s@]+$/)` | Engine-native JID, e.g. `1234567890@c.us` |
+| Field    | Type   | Required | Constraints                                                                    | Description                                                                               |
+| -------- | ------ | -------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| `chatId` | string | Yes      | `@IsString`; `@IsNotEmpty`; `@MaxLength(255)`; `@Matches(/^[^\s@]+@[^\s@]+$/)` | Chat ID in the neutral form the gateway returns, on either engine, e.g. `1234567890@c.us` |
 
 This route takes `chatId` alone. It previously shared `MarkChatReadDto`, which is why the two are described separately now that the read body carries `messageIds`.
 
@@ -1068,10 +1068,10 @@ Delete every message in a chat, keeping the chat itself in the list.
 
 **Path parameters**
 
-| Name        | Type   | Description                                                                           |
-| ----------- | ------ | ------------------------------------------------------------------------------------- |
-| `sessionId` | string | Session UUID                                                                          |
-| `chatId`    | string | Engine-native JID, e.g. `1234567890-123@g.us`. URL-encode it if your client does not. |
+| Name        | Type   | Description                                                                                                                           |
+| ----------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `sessionId` | string | Session UUID                                                                                                                          |
+| `chatId`    | string | Chat ID in the neutral form the gateway returns, on either engine, e.g. `1234567890-123@g.us`. URL-encode it if your client does not. |
 
 **Response** `200`
 
@@ -1101,10 +1101,10 @@ Archive or unarchive a chat.
 
 **Request body** — `ArchiveChatDto`
 
-| Field     | Type    | Required | Constraints                                                                                                                                              | Description                                   |
-| --------- | ------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| `chatId`  | string  | Yes      | `@IsString`; `@IsNotEmpty`; `@MaxLength(255)`; `@Matches(/^[^\s@]+@[^\s@]+$/)` (localpart@host, no whitespace)                                           | Engine-native JID, e.g. `1234567890-123@g.us` |
-| `archive` | boolean | Yes      | `@IsBoolean` (strict: the exact strings `"true"`/`"false"` map to booleans; any other string such as `"0"` or `"no"` is rejected, not coerced to `true`) | `true` to archive, `false` to unarchive       |
+| Field     | Type    | Required | Constraints                                                                                                                                              | Description                                                                                   |
+| --------- | ------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `chatId`  | string  | Yes      | `@IsString`; `@IsNotEmpty`; `@MaxLength(255)`; `@Matches(/^[^\s@]+@[^\s@]+$/)` (localpart@host, no whitespace)                                           | Chat ID in the neutral form the gateway returns, on either engine, e.g. `1234567890-123@g.us` |
+| `archive` | boolean | Yes      | `@IsBoolean` (strict: the exact strings `"true"`/`"false"` map to booleans; any other string such as `"0"` or `"no"` is rejected, not coerced to `true`) | `true` to archive, `false` to unarchive                                                       |
 
 ```json
 { "chatId": "1234567890-123@g.us", "archive": true }
@@ -1143,10 +1143,10 @@ Mute a chat's notifications until a given moment, or unmute it.
 
 **Request body** — `MuteChatDto`
 
-| Field       | Type           | Required | Constraints                                                                                                    | Description                                                     |
-| ----------- | -------------- | -------- | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `chatId`    | string         | Yes      | `@IsString`; `@IsNotEmpty`; `@MaxLength(255)`; `@Matches(/^[^\s@]+@[^\s@]+$/)` (localpart@host, no whitespace) | Engine-native JID, e.g. `1234567890-123@g.us`                   |
-| `muteUntil` | number \| null | Yes      | `@IsInt`; `@Min(1)`; `@Max(9007199254740991)` when not `null`                                                  | Epoch **milliseconds** the mute expires at, or `null` to unmute |
+| Field       | Type           | Required | Constraints                                                                                                    | Description                                                                                   |
+| ----------- | -------------- | -------- | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `chatId`    | string         | Yes      | `@IsString`; `@IsNotEmpty`; `@MaxLength(255)`; `@Matches(/^[^\s@]+@[^\s@]+$/)` (localpart@host, no whitespace) | Chat ID in the neutral form the gateway returns, on either engine, e.g. `1234567890-123@g.us` |
+| `muteUntil` | number \| null | Yes      | `@IsInt`; `@Min(1)`; `@Max(9007199254740991)` when not `null`                                                  | Epoch **milliseconds** the mute expires at, or `null` to unmute                               |
 
 ```json
 { "chatId": "1234567890-123@g.us", "muteUntil": 1800000000000 }
@@ -1196,10 +1196,10 @@ Pin a chat to the top of the chat list, or unpin it. Chat-level — distinct fro
 
 **Request body** — `PinChatDto`
 
-| Field    | Type    | Required | Constraints                                                                                                                                              | Description                                   |
-| -------- | ------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| `chatId` | string  | Yes      | `@IsString`; `@IsNotEmpty`; `@MaxLength(255)`; `@Matches(/^[^\s@]+@[^\s@]+$/)` (localpart@host, no whitespace)                                           | Engine-native JID, e.g. `1234567890-123@g.us` |
-| `pin`    | boolean | Yes      | `@IsBoolean` (strict: the exact strings `"true"`/`"false"` map to booleans; any other string such as `"0"` or `"no"` is rejected, not coerced to `true`) | `true` to pin, `false` to unpin               |
+| Field    | Type    | Required | Constraints                                                                                                                                              | Description                                                                                   |
+| -------- | ------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `chatId` | string  | Yes      | `@IsString`; `@IsNotEmpty`; `@MaxLength(255)`; `@Matches(/^[^\s@]+@[^\s@]+$/)` (localpart@host, no whitespace)                                           | Chat ID in the neutral form the gateway returns, on either engine, e.g. `1234567890-123@g.us` |
+| `pin`    | boolean | Yes      | `@IsBoolean` (strict: the exact strings `"true"`/`"false"` map to booleans; any other string such as `"0"` or `"no"` is rejected, not coerced to `true`) | `true` to pin, `false` to unpin                                                               |
 
 ```json
 { "chatId": "1234567890-123@g.us", "pin": true }
@@ -1237,9 +1237,9 @@ Delete a chat from the chat list (e.g. a group you have left).
 
 **Request body** — `DeleteChatDto`
 
-| Field    | Type   | Required | Constraints                                                                                                    | Description                                   |
-| -------- | ------ | -------- | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| `chatId` | string | Yes      | `@IsString`; `@IsNotEmpty`; `@MaxLength(255)`; `@Matches(/^[^\s@]+@[^\s@]+$/)` (localpart@host, no whitespace) | Engine-native JID, e.g. `1234567890-123@g.us` |
+| Field    | Type   | Required | Constraints                                                                                                    | Description                                                                                   |
+| -------- | ------ | -------- | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `chatId` | string | Yes      | `@IsString`; `@IsNotEmpty`; `@MaxLength(255)`; `@Matches(/^[^\s@]+@[^\s@]+$/)` (localpart@host, no whitespace) | Chat ID in the neutral form the gateway returns, on either engine, e.g. `1234567890-123@g.us` |
 
 ```json
 { "chatId": "1234567890-123@g.us" }
@@ -1274,10 +1274,10 @@ Send a typing/recording presence indicator to a chat (or clear it with `paused`)
 
 **Request body** — `SendChatStateDto`
 
-| Field    | Type                                | Required | Constraints                                                                                                    | Description                                                 |
-| -------- | ----------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `chatId` | string                              | Yes      | `@IsString`; `@IsNotEmpty`; `@MaxLength(255)`; `@Matches(/^[^\s@]+@[^\s@]+$/)` (localpart@host, no whitespace) | Engine-native chat id, e.g. `1234567890@c.us`               |
-| `state`  | `typing` \| `recording` \| `paused` | Yes      | `@IsIn(['typing','recording','paused'])`                                                                       | `typing`/`recording` show the indicator; `paused` clears it |
+| Field    | Type                                | Required | Constraints                                                                                                    | Description                                                                               |
+| -------- | ----------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `chatId` | string                              | Yes      | `@IsString`; `@IsNotEmpty`; `@MaxLength(255)`; `@Matches(/^[^\s@]+@[^\s@]+$/)` (localpart@host, no whitespace) | Chat ID in the neutral form the gateway returns, on either engine, e.g. `1234567890@c.us` |
+| `state`  | `typing` \| `recording` \| `paused` | Yes      | `@IsIn(['typing','recording','paused'])`                                                                       | `typing`/`recording` show the indicator; `paused` clears it                               |
 
 ```json
 { "chatId": "1234567890@c.us", "state": "typing" }
