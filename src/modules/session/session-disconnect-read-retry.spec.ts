@@ -18,6 +18,9 @@ async function until(condition: () => boolean, what: string): Promise<void> {
   }
 }
 
+/** A step an engine fixture holds until the case settles it. */
+type Gate = { promise: Promise<void>; resolve: () => void; reject: (error: Error) => void };
+
 /**
  * A disconnect whose session read fails is handled again once the row can be read: the retry sits on the
  * episode's reconnect timer. The fixture drives the real lifecycle and registry; the repository's rejected
@@ -41,12 +44,27 @@ function fixture() {
       return Promise.resolve({ affected: 1 });
     }),
   };
-  const engines: Array<{ initialize: jest.Mock }> = [];
+  const engines: Array<{ initialize: jest.Mock; destroy: jest.Mock }> = [];
+  // A step of the engine created at that index that waits for the case to settle it: a wedged teardown, a slow init.
+  const gates = new Map<string, Gate>();
+  const hold = (step: 'initialize' | 'destroy', index: number): Gate => {
+    let resolve!: () => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<void>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    const gate = { promise, resolve, reject };
+    gates.set(`${step}:${index}`, gate);
+    return gate;
+  };
   const factory = {
     create: jest.fn(() => {
+      const index = engines.length;
+      const step = (name: string) => (): Promise<void> => gates.get(`${name}:${index}`)?.promise ?? Promise.resolve();
       const engine = {
-        initialize: jest.fn().mockResolvedValue(undefined),
-        destroy: jest.fn().mockResolvedValue(undefined),
+        initialize: jest.fn(step('initialize')),
+        destroy: jest.fn(step('destroy')),
         forceDestroy: jest.fn().mockResolvedValue(undefined),
         disconnect: jest.fn().mockResolvedValue(undefined),
         logout: jest.fn().mockResolvedValue(undefined),
@@ -72,6 +90,8 @@ function fixture() {
     emitQRCode: jest.fn(),
   };
   const audit = { logWarn: jest.fn().mockResolvedValue(undefined), logInfo: jest.fn().mockResolvedValue(undefined) };
+  const webhooks = { dispatch: jest.fn().mockResolvedValue(undefined) };
+  const hooks = { execute: jest.fn().mockResolvedValue({ continue: true }) };
   const registry = new EngineRegistry();
   const lifecycle = new SessionEngineLifecycle(
     repository as never,
@@ -84,8 +104,8 @@ function fixture() {
     restrictions as never,
     presence as never,
     events as never,
-    { dispatch: jest.fn().mockResolvedValue(undefined) } as never,
-    { execute: jest.fn().mockResolvedValue({ continue: true }) } as never,
+    webhooks as never,
+    hooks as never,
     {} as never,
     undefined,
     undefined,
@@ -118,6 +138,21 @@ function fixture() {
     );
     await until(() => !reconnectState()?.initInFlight, `reconnect ${count} to settle`);
   };
+  /** The reasons session.disconnected went out with, in order; the socket event and the plugin hook must match. */
+  const announced = (): string[] => {
+    const webhook = (webhooks.dispatch.mock.calls as [string, string, { reason: string }][])
+      .filter(([, event]) => event === 'session.disconnected')
+      .map(([, , payload]) => payload.reason);
+    const socket = (events.emitSessionDisconnected.mock.calls as [string, { reason: string }][]).map(
+      ([, payload]) => payload.reason,
+    );
+    const hook = (hooks.execute.mock.calls as [string, { reason: string }][])
+      .filter(([name]) => name === 'session:disconnected')
+      .map(([, payload]) => payload.reason);
+    expect(socket).toEqual(webhook);
+    expect(hook).toEqual(webhook);
+    return webhook;
+  };
   return {
     lifecycle,
     registry,
@@ -125,6 +160,8 @@ function fixture() {
     stored,
     engines,
     audit,
+    hold,
+    announced,
     callbacksOf,
     settled,
     reconnectState,
@@ -132,6 +169,12 @@ function fixture() {
     disown,
     unlinkAudits,
   };
+}
+
+/** The engine at that index links a number other than the one the session was bound to. */
+async function linkOther(f: ReturnType<typeof fixture>, index = 1): Promise<void> {
+  f.callbacksOf(index).onReady?.(OTHER, 'Other');
+  await until(() => f.stored.phone === OTHER || f.stored.status === SessionStatus.FAILED, 'the link to settle');
 }
 
 describe('a disconnect read retry armed for an engine already replaced', () => {
@@ -183,12 +226,6 @@ describe('a disconnect read retry armed for an engine already replaced', () => {
 // inside the same episode, while the timer the watchdog report armed is pending.
 describe('a WhatsApp unlink whose session read fails while the episode timer is armed', () => {
   afterEach(() => jest.useRealTimers());
-
-  /** The next engine links a number other than the one the session was bound to. */
-  const linkOther = async (f: ReturnType<typeof fixture>): Promise<void> => {
-    f.callbacksOf(1).onReady?.(OTHER, 'Other');
-    await until(() => f.stored.phone === OTHER || f.stored.status === SessionStatus.FAILED, 'the link to settle');
-  };
 
   it('is handled as an unlink once the row reads, when the report before it could not read the row either', async () => {
     const f = fixture();
@@ -244,6 +281,24 @@ describe('a WhatsApp unlink whose session read fails while the episode timer is 
       expect(f.unlinkAudits()).toHaveLength(1);
     },
   );
+
+  it.each([
+    ['fails', true],
+    ['answers', false],
+  ])('is announced with its reason when a reconnect is armed and its read %s', async (_outcome, readFails) => {
+    const f = fixture();
+    await f.lifecycle.start(ID);
+    const first = f.callbacksOf(0);
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask', 'Date'] });
+
+    await f.lifecycle.handleEngineDisconnected(ID, f.registry.get(ID)!, WATCHDOG);
+    if (readFails) f.repository.findOne.mockRejectedValueOnce(new Error('SQLITE_BUSY: database is locked'));
+    first.onDisconnected?.('LOGOUT');
+    await f.settled();
+
+    expect(f.unlinkAudits()).toHaveLength(1);
+    expect(f.announced()).toEqual([WATCHDOG, 'LOGOUT']);
+  });
 
   it('is audited once when it is reported again while its own read retry waits', async () => {
     const f = fixture();
@@ -385,5 +440,248 @@ describe('a WhatsApp unlink whose session read fails while the episode timer is 
     expect(f.reconnectState()).toBeUndefined();
     expect(f.unlinkAudits()).toHaveLength(0);
     expect(f.stored.phone).toBe(BOUND);
+  });
+});
+
+// The liveness watchdog arms a reconnect. It fires while the engine still reads READY, and a wedged Chromium keeps
+// its teardown running; the engine is still the live one then, so its own report can arrive and fail to read.
+describe('a disconnect whose session read fails while a running reconnect tears its engine down', () => {
+  afterEach(() => jest.useRealTimers());
+
+  /** Arms the watchdog reconnect and fires it, with the old engine's teardown held; returns that teardown. */
+  async function tearDownSlowly(f: ReturnType<typeof fixture>): Promise<Gate> {
+    await f.lifecycle.start(ID);
+    const teardown = f.hold('destroy', 0);
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask', 'Date'] });
+    await f.lifecycle.handleEngineDisconnected(ID, f.registry.get(ID)!, WATCHDOG);
+    await jest.advanceTimersByTimeAsync(3_000);
+    await until(() => f.engines[0].destroy.mock.calls.length > 0, 'the old engine teardown');
+    return teardown;
+  }
+
+  /** Lets the teardown finish and waits for the engine the reconnect brings up. */
+  async function finishTeardown(f: ReturnType<typeof fixture>, teardown: Gate): Promise<void> {
+    teardown.resolve();
+    await until(() => f.engines.length === 2 && f.engines[1].initialize.mock.calls.length > 0, 'engine 2 to start');
+    await until(() => !f.reconnectState()?.initInFlight, 'the reconnect to settle');
+  }
+
+  /** The engine at that index drops, and its session read fails. */
+  async function dropWithFailedRead(f: ReturnType<typeof fixture>, index: number, reason: string): Promise<void> {
+    f.repository.findOne.mockRejectedValueOnce(new Error('SQLITE_BUSY: database is locked'));
+    f.callbacksOf(index).onDisconnected?.(reason);
+    await f.settled();
+  }
+
+  it.each(['LOGOUT', 'logged out'])(
+    'records and announces a %s unlink once, and the next engine links whichever number scans its QR',
+    async reason => {
+      const f = fixture();
+      const teardown = await tearDownSlowly(f);
+      await dropWithFailedRead(f, 0, reason);
+      await finishTeardown(f, teardown);
+
+      expect(f.unlinkAudits()).toHaveLength(1);
+      expect(f.stored.phone).toBeNull();
+      expect(f.announced()).toEqual([WATCHDOG, reason]);
+
+      // Nothing armed for the old engine runs later.
+      await jest.advanceTimersByTimeAsync(3_000);
+      await f.settled();
+      await linkOther(f);
+      expect(f.stored.phone).toBe(OTHER);
+      expect(f.stored.status).toBe(SessionStatus.READY);
+      expect(f.engines).toHaveLength(2);
+      expect(f.unlinkAudits()).toHaveLength(1);
+    },
+  );
+
+  it('reconnects the next engine when its own drop read fails too', async () => {
+    const f = fixture();
+    const teardown = await tearDownSlowly(f);
+    await dropWithFailedRead(f, 0, 'NAVIGATION');
+    await finishTeardown(f, teardown);
+
+    await dropWithFailedRead(f, 1, 'NAVIGATION');
+    await jest.advanceTimersByTimeAsync(1_000);
+    await f.settled();
+    await f.runReconnect(3);
+    expect(f.engines).toHaveLength(3);
+    expect(f.unlinkAudits()).toHaveLength(0);
+  });
+
+  it('reconnects the next engine whose drop read fails when the old engine reported nothing', async () => {
+    const f = fixture();
+    const teardown = await tearDownSlowly(f);
+    await finishTeardown(f, teardown);
+
+    await dropWithFailedRead(f, 1, 'NAVIGATION');
+    await jest.advanceTimersByTimeAsync(1_000);
+    await f.settled();
+    await f.runReconnect(3);
+    expect(f.engines).toHaveLength(3);
+  });
+
+  it('records the unlink once when its retry is still reading the row as the engine goes', async () => {
+    const f = fixture();
+    const teardown = await tearDownSlowly(f);
+    await dropWithFailedRead(f, 0, 'LOGOUT');
+
+    // The retry fires during the teardown and its read answers only once the engine is gone.
+    let answer: ((row: Session) => void) | undefined;
+    f.repository.findOne.mockImplementationOnce(() => new Promise<Session>(resolve => (answer = resolve)));
+    await jest.advanceTimersByTimeAsync(1_000);
+    await until(() => answer !== undefined, 'the retry to read the row');
+    await finishTeardown(f, teardown);
+    answer?.({ ...f.stored });
+    await f.settled();
+
+    expect(f.unlinkAudits()).toHaveLength(1);
+    expect(f.announced()).toEqual([WATCHDOG, 'LOGOUT']);
+    await linkOther(f);
+    expect(f.stored.status).toBe(SessionStatus.READY);
+  });
+
+  it('records the unlink once when its retry fires during the teardown and fails to read again', async () => {
+    const f = fixture();
+    const teardown = await tearDownSlowly(f);
+    f.repository.findOne.mockRejectedValueOnce(new Error('SQLITE_BUSY: database is locked'));
+    await dropWithFailedRead(f, 0, 'LOGOUT');
+    await jest.advanceTimersByTimeAsync(1_000);
+    await f.settled();
+    await finishTeardown(f, teardown);
+
+    expect(f.unlinkAudits()).toHaveLength(1);
+    expect(f.announced()).toEqual([WATCHDOG, 'LOGOUT']);
+    await jest.advanceTimersByTimeAsync(3_000);
+    await f.settled();
+    await linkOther(f);
+    expect(f.stored.status).toBe(SessionStatus.READY);
+    expect(f.engines).toHaveLength(2);
+    expect(f.unlinkAudits()).toHaveLength(1);
+  });
+
+  it('lets the attempt that links the next engine record the unlink when two attempts share the teardown', async () => {
+    const f = fixture();
+    const teardown = await tearDownSlowly(f);
+    // A drop whose read answers while the old engine is still the live one arms a second attempt, which fires
+    // and waits on the same teardown.
+    f.callbacksOf(0).onDisconnected?.('NAVIGATION');
+    await f.settled();
+    await jest.advanceTimersByTimeAsync(3_000);
+    await until(() => f.engines[0].destroy.mock.calls.length > 1, 'the second attempt to tear the engine down');
+    await dropWithFailedRead(f, 0, 'LOGOUT');
+    await finishTeardown(f, teardown);
+
+    expect(f.unlinkAudits()).toHaveLength(1);
+    await linkOther(f);
+    expect(f.stored.phone).toBe(OTHER);
+    expect(f.stored.status).toBe(SessionStatus.READY);
+    expect(f.engines).toHaveLength(2);
+  });
+
+  it('keeps the binding when this node no longer owns the session', async () => {
+    const f = fixture();
+    const teardown = await tearDownSlowly(f);
+    f.disown();
+    await dropWithFailedRead(f, 0, 'LOGOUT');
+    teardown.resolve();
+    await until(() => f.unlinkAudits().length > 0, 'the unlink to be recorded');
+    await until(() => !f.reconnectState()?.initInFlight, 'the reconnect to settle');
+
+    // The audit row is not fenced, as on the path whose read answers; the phone clear is.
+    expect(f.unlinkAudits()).toHaveLength(1);
+    expect(f.repository.update).not.toHaveBeenCalledWith(ID, { phone: null });
+    expect(f.stored.phone).toBe(BOUND);
+  });
+});
+
+// The watchdog report reads the row slowly. The engine's own unlink report fails its read first and arms the read
+// retry, and then the watchdog report's read answers.
+describe('an unlink whose read retry an earlier report ends when its own read answers', () => {
+  afterEach(() => jest.useRealTimers());
+
+  it('is handled as that disconnect, announced once with the unlink reason', async () => {
+    const f = fixture();
+    await f.lifecycle.start(ID);
+    const first = f.callbacksOf(0);
+    const engine = f.registry.get(ID)!;
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask', 'Date'] });
+
+    let answer!: (row: Session) => void;
+    f.repository.findOne.mockImplementationOnce(() => new Promise<Session>(resolve => (answer = resolve)));
+    const watchdog = f.lifecycle.handleEngineDisconnected(ID, engine, WATCHDOG);
+    f.repository.findOne.mockRejectedValueOnce(new Error('SQLITE_BUSY: database is locked'));
+    first.onDisconnected?.('LOGOUT');
+    await until(() => f.reconnectState()?.timer != null, 'the read retry');
+
+    answer({ ...f.stored });
+    await watchdog;
+    await f.settled();
+    expect(f.unlinkAudits()).toHaveLength(1);
+    expect(f.stored.phone).toBeNull();
+    expect(f.announced()).toEqual(['LOGOUT']);
+
+    await f.runReconnect(2);
+    await linkOther(f);
+    expect(f.stored.status).toBe(SessionStatus.READY);
+    expect(f.engines).toHaveLength(2);
+  });
+
+  it('is recorded once when its retry already reads the row again as that report answers', async () => {
+    const f = fixture();
+    await f.lifecycle.start(ID);
+    const first = f.callbacksOf(0);
+    const engine = f.registry.get(ID)!;
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask', 'Date'] });
+
+    const answers: Array<(row: Session) => void> = [];
+    const slowRead = (): Promise<Session> => new Promise<Session>(resolve => answers.push(resolve));
+    f.repository.findOne.mockImplementationOnce(slowRead);
+    const watchdog = f.lifecycle.handleEngineDisconnected(ID, engine, WATCHDOG);
+    f.repository.findOne.mockRejectedValueOnce(new Error('SQLITE_BUSY: database is locked'));
+    first.onDisconnected?.('LOGOUT');
+    await until(() => f.reconnectState()?.timer != null, 'the read retry');
+
+    // The retry fires and reads the row slowly too, and the watchdog report's read answers first.
+    f.repository.findOne.mockImplementationOnce(slowRead);
+    await jest.advanceTimersByTimeAsync(1_000);
+    await until(() => answers.length === 2, 'the retry to read the row');
+    answers[0]({ ...f.stored });
+    await watchdog;
+    answers[1]({ ...f.stored });
+    await f.settled();
+
+    expect(f.unlinkAudits()).toHaveLength(1);
+    expect(f.announced()).toEqual([WATCHDOG, 'LOGOUT']);
+    expect(f.stored.phone).toBeNull();
+  });
+});
+
+describe('an unlink whose read fails while the reconnect engine initializes', () => {
+  afterEach(() => jest.useRealTimers());
+
+  it('is recorded and announced when that init fails, and the next engine links whichever number scans its QR', async () => {
+    const f = fixture();
+    await f.lifecycle.start(ID);
+    const init = f.hold('initialize', 1);
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask', 'Date'] });
+    await f.lifecycle.handleEngineDisconnected(ID, f.registry.get(ID)!, WATCHDOG);
+    await jest.advanceTimersByTimeAsync(3_000);
+    await until(() => f.engines.length === 2 && f.engines[1].initialize.mock.calls.length > 0, 'engine 2 to start');
+
+    f.repository.findOne.mockRejectedValueOnce(new Error('SQLITE_BUSY: database is locked'));
+    f.callbacksOf(1).onDisconnected?.('LOGOUT');
+    await f.settled();
+    init.reject(new Error('Navigation failed'));
+    await until(() => !f.reconnectState()?.initInFlight && f.reconnectState()?.timer != null, 'the next attempt');
+
+    expect(f.unlinkAudits()).toHaveLength(1);
+    expect(f.stored.phone).toBeNull();
+    expect(f.announced()).toEqual([WATCHDOG, 'LOGOUT']);
+    await f.runReconnect(3);
+    await linkOther(f, 2);
+    expect(f.stored.phone).toBe(OTHER);
+    expect(f.stored.status).toBe(SessionStatus.READY);
   });
 });

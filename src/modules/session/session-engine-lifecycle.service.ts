@@ -1145,9 +1145,11 @@ export class SessionEngineLifecycle {
     // replacement engine that is already READY.
     if (!this.isLiveEngine(id, engine)) return;
 
-    // This read answered, so a retry an earlier failed read armed is moot: left pending, it would hold
-    // the reconnect slot and publish this same disconnect a second time when it fired.
-    this.endReadRetry(id);
+    // This read answered, so a retry an earlier failed read armed ends here: left pending, it would hold
+    // the reconnect slot and publish this same disconnect a second time when it fired. An unlink it was
+    // to re-run with is this disconnect's reason now; a retry already re-reading handles its own.
+    const pending = this.endReadRetry(id);
+    if (pending && TERMINAL_UNLINK_REASONS.has(pending) && !TERMINAL_UNLINK_REASONS.has(reason)) reason = pending;
 
     this.logger.warn(`Session disconnected: ${reason}`, {
       sessionId: id,
@@ -1168,18 +1170,7 @@ export class SessionEngineLifecycle {
       session = { ...session, phone: null };
     }
 
-    void this.webhookService.dispatch(id, 'session.disconnected', { sessionId: id, reason });
-    this.eventsGateway.emitSessionDisconnected(id, { reason });
-
-    // Execute hook for disconnected event
-    void this.hookManager.execute(
-      'session:disconnected',
-      { reason },
-      {
-        sessionId: id,
-        source: 'Engine',
-      },
-    );
+    this.announceDisconnected(id, reason);
 
     void this.updateStatus(id, SessionStatus.DISCONNECTED).catch(err =>
       this.logger.warn('Failed to persist the disconnected status', {
@@ -1215,10 +1206,10 @@ export class SessionEngineLifecycle {
     if (!this.isLiveEngine(id, engine)) return;
     if (state.timer) {
       // An unlink must not be lost behind the drop reported before it. A pending read retry re-runs with the
-      // unlink's reason once the row reads; an armed reconnect needs no row for it, so it is recorded now.
+      // unlink's reason once the row reads; an armed reconnect needs no row for it, so it is reported now.
       if (!TERMINAL_UNLINK_REASONS.has(reason)) return;
       if (state.readRetry?.timer === state.timer) state.readRetry.reason = reason;
-      else this.recordTerminalUnlink(id, reason);
+      else this.reportUnlinkWithoutRow(id, reason);
       return;
     }
     const attempts = (state.readRetry?.attempts ?? 0) + 1;
@@ -1265,16 +1256,47 @@ export class SessionEngineLifecycle {
     return true;
   }
 
-  /** Ends the read retry: its timer, when it is still the one armed, and the count its backoff keeps. */
-  private endReadRetry(id: string): void {
+  /** The disconnect's notifications: the session.disconnected webhook, its socket event and the plugin hook. */
+  private announceDisconnected(id: string, reason: string): void {
+    void this.webhookService.dispatch(id, 'session.disconnected', { sessionId: id, reason });
+    this.eventsGateway.emitSessionDisconnected(id, { reason });
+    void this.hookManager.execute('session:disconnected', { reason }, { sessionId: id, source: 'Engine' });
+  }
+
+  /**
+   * An unlink handled without its session row: recorded, and announced as one whose row read is. Nothing
+   * re-runs it, so it is announced once. Returns whether the phone was cleared.
+   */
+  private reportUnlinkWithoutRow(id: string, reason: string): boolean {
+    const cleared = this.recordTerminalUnlink(id, reason);
+    this.announceDisconnected(id, reason);
+    return cleared;
+  }
+
+  /**
+   * Ends the read retry: its timer, when it is still the one armed, and the count its backoff keeps. Returns
+   * the reason of a retry still armed, which never re-runs now; one that fired is re-reading on its own.
+   */
+  private endReadRetry(id: string): string | undefined {
     const state = this.reconnectStates.get(id);
     const retry = state?.readRetry;
-    if (!state || !retry) return;
-    if (state.timer === retry.timer) {
-      clearTimeout(retry.timer);
-      state.timer = null;
-    }
+    if (!state || !retry) return undefined;
     state.readRetry = undefined;
+    if (state.timer !== retry.timer) return undefined;
+    clearTimeout(retry.timer);
+    state.timer = null;
+    return retry.reason;
+  }
+
+  /**
+   * Ends a read retry whose engine is gone. Armed, it would hold the timer the next engine's drop needs; armed
+   * or already re-reading, it ends at the engine fence. An unlink it carried is reported here instead, so the
+   * caller's next engine links whichever number scans its QR. Returns whether the phone was cleared.
+   */
+  private endReadRetryOfGoneEngine(id: string): boolean {
+    const reason = this.reconnectStates.get(id)?.readRetry?.reason;
+    this.endReadRetry(id);
+    return reason !== undefined && TERMINAL_UNLINK_REASONS.has(reason) && this.reportUnlinkWithoutRow(id, reason);
   }
 
   private scheduleReconnect(id: string, session: Session): void {
@@ -1470,6 +1492,12 @@ export class SessionEngineLifecycle {
         // collide with the orphan (#1081); each step is bounded, so it can't wedge a second time.
         await this.fences.destroyWithEscalation(id, oldEngine);
         this.engines.deleteIfLive(id, oldEngine);
+        // A failed read of the old engine's report during that teardown armed a retry for it. The attempt that
+        // links the next engine ends it: a start since then owns a state of its own, and a later attempt
+        // sharing this one ends it itself.
+        if (this.reconnectStates.get(id) === state && state.started === attempt && this.endReadRetryOfGoneEngine(id)) {
+          session = { ...session, phone: null };
+        }
       }
 
       // Credential-teardown fence — BEFORE engineFactory.create (inside initializeEngine). A logout
@@ -1578,7 +1606,7 @@ export class SessionEngineLifecycle {
       // A read retry the disconnect of this attempt's own engine armed waits on an engine that is gone
       // now: it would hold the timer the next attempt needs, then fire against the evicted engine and
       // end at its fence, leaving the session with no engine and nothing armed.
-      this.endReadRetry(id);
+      if (this.endReadRetryOfGoneEngine(id)) session = { ...session, phone: null };
       // Schedule another attempt. The row stays INITIALIZING through the backoff (an active status, with
       // lastError still showing the reason), so a retryable failure writes nothing per attempt.
       this.scheduleReconnect(id, session);
