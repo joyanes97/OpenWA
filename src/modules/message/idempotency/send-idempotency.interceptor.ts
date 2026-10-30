@@ -29,7 +29,7 @@ const CLAIMABLE_SESSION_ID_MAX_LENGTH = 255;
  *
  * A 4xx or 501 before the engine call is a refusal. Errors escaping the shared engine-send failure
  * boundary stay uncertain unless the engine proves nothing was handed to WhatsApp (EngineNotSentError, media
- * it could not fetch or read, or a socket replaced before the write; see markNothingSent), or WhatsApp itself
+ * it could not fetch or read, or a not-ready refusal before the hand-over; see markNothingSent), or WhatsApp itself
  * turned the request away with a rate limit (EngineThrottledError): a socket can report 409 after WhatsApp
  * accepted the message. Other server errors/timeouts also keep the key taken.
  */
