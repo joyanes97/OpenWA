@@ -186,6 +186,8 @@ export interface BaileysLifecycleHost {
   getOnQRCode(): EngineEventCallbacks['onQRCode'];
   /** The currently-registered onReady callback, if any (assigned at initialize()). */
   getOnReady(): EngineEventCallbacks['onReady'];
+  /** The currently-registered onPushNameChanged callback, if any (assigned at initialize()). */
+  getOnPushNameChanged(): EngineEventCallbacks['onPushNameChanged'];
   /** The currently-registered onDisconnected callback, if any (assigned at initialize()). */
   getOnDisconnected(): EngineEventCallbacks['onDisconnected'];
   /** The currently-registered onReconnecting callback, if any (assigned at initialize()). */
@@ -557,6 +559,13 @@ export class BaileysLifecycle {
       if (awaitingFirstSync && (update.accountSyncCounter ?? 0) > 0) {
         awaitingFirstSync = false;
         this.scheduleAddressbookRestore(sock);
+      }
+      // A newly linked account's name syncs only after the connection opened (an app-state push name or an
+      // own message), so the one read at open was empty. Before READY the open branch reads it live anyway.
+      const name = update.me?.name;
+      if (name && name !== this.pushName && this.sock === sock && this.status === EngineStatus.READY) {
+        this.pushName = name;
+        this.host.getOnPushNameChanged()?.(name);
       }
     });
     sock.ev.on('connection.update', update => this.handleConnectionUpdate(update));

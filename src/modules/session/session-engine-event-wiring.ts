@@ -57,6 +57,8 @@ export interface SessionEngineWiringHost {
    */
   ownsSession(id: string): boolean;
   handleEngineReady(id: string, engine: IWhatsAppEngine, phone: string, pushName: string): void;
+  /** The account's push name learned after ready: stored on the row, announced nowhere. */
+  handleEnginePushName(id: string, engine: IWhatsAppEngine, pushName: string): void;
   /**
    * Refuse a ready link whose account differs from the one this session is bound to: tear the wrong
    * account's engine down (logout wipes its credentials), land the session in FAILED, and record why.
@@ -236,6 +238,7 @@ export class SessionEngineEventWiring {
         }
         host.handleEngineReady(id, engine, phone, pushName);
       },
+      onPushNameChanged: (pushName): void => host.handleEnginePushName(id, engine, pushName),
       // PostgreSQL only: holds each inbound message from arrival until its row is written.
       ...(host.messages.holdsInbound
         ? { admitInbound: arrival => host.messages.admitInbound(id, engine, arrival) }

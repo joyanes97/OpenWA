@@ -403,6 +403,7 @@ export class SessionEngineLifecycle {
       isOperatorTeardown: (id, engine) => this.operatorTeardowns.get(id) === engine,
       ownsSession: id => this.ownsSession(id),
       handleEngineReady: (id, engine, phone, pushName) => this.handleEngineReady(id, engine, phone, pushName),
+      handleEnginePushName: (id, engine, pushName) => this.handleEnginePushName(id, engine, pushName),
       rejectRebind: (id, engine, sessionName, previousPhone, incomingPhone) =>
         this.rejectRebind(id, engine, sessionName, previousPhone, incomingPhone),
       handleEngineDisconnected: (id, engine, reason) => this.handleEngineDisconnected(id, engine, reason),
@@ -665,8 +666,8 @@ export class SessionEngineLifecycle {
    * gateway always has one and this fence is live single-node too.
    *
    * SCOPE, stated plainly so the guarantee is not read wider than it is. Fenced: the three status
-   * writes in the event wiring, the exhausted-reconnect FAILED, the start-path FAILED in controls,
-   * and the terminal-unlink phone clear in recordTerminalUnlink (like FAILED, a wrongly nulled
+   * writes in the event wiring, the exhausted-reconnect FAILED, the start-path FAILED in controls, the push
+   * name stored after ready, and the terminal-unlink phone clear in recordTerminalUnlink (like FAILED, a wrongly nulled
    * phone does not self-heal until the owner's next READY). NOT fenced: handleEngineReady's direct
    * row write and handleEngineDisconnected's DISCONNECTED — both statuses are in the boot reset's
    * activeStatuses AND in TAKEOVER_STATUSES, so a wrong one self-heals, unlike FAILED. The gate is
@@ -1024,6 +1025,23 @@ export class SessionEngineLifecycle {
         action: 'status_seed_on_ready_disabled',
       });
     }
+  }
+
+  /**
+   * Store the account's push name an engine learned after its ready event (Baileys syncs a newly linked
+   * account's name only once the connection opened, so the ready row got an empty one). The row alone:
+   * session.authenticated went out at ready and is not sent again. Fenced like the other engine-driven row
+   * writes, and by id, so a session deleted meanwhile has no row to change.
+   */
+  private handleEnginePushName(id: string, engine: IWhatsAppEngine, pushName: string): void {
+    if (!pushName || !this.isLiveEngine(id, engine) || !this.ownsSession(id)) return;
+    void this.sessionRepository.update(id, { pushName }).catch(err =>
+      this.logger.warn('Failed to store the synced push name', {
+        sessionId: id,
+        error: String(err),
+        action: 'push_name_store_failed',
+      }),
+    );
   }
 
   /**
