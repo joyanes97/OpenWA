@@ -30,6 +30,7 @@ import { buildVCard } from './vcard';
 import { EngineNotSupportedError } from '../../common/errors/engine-not-supported.error';
 import { RecipientUnreachableError } from '../../common/errors/recipient-unreachable.error';
 import { EngineNotReadyError } from '../../common/errors/engine-not-ready.error';
+import { markNothingSent } from '../../common/errors/engine-not-sent.error';
 import { RecipientLookupUnansweredError } from '../../common/errors/engine-page.error';
 import { type WwebjsEngineHost, requireClient, withPage } from './wwebjs-host';
 import { toCapturedPageError } from './wwebjs-lifecycle';
@@ -371,6 +372,18 @@ export class WwebjsMessaging {
     return requireClient(this.host);
   }
 
+  /**
+   * The readiness check of a send before anything was handed to the page: its 409 proves nothing was sent, so a
+   * keyed send frees its `Idempotency-Key`. Not for a check after a send attempt, which may have left the page.
+   */
+  private ensureReadyToSend(): void {
+    try {
+      this.host.ensureReady();
+    } catch (error) {
+      throw markNothingSent(error);
+    }
+  }
+
   /** See {@link withPage} for what a dead page answers here. */
   private withPage<T>(context: string, op: () => Promise<T>): Promise<T> {
     return withPage(this.host, context, op);
@@ -387,7 +400,7 @@ export class WwebjsMessaging {
       return await read();
     } catch (error) {
       this.host.reportIfPageTransportError(error, context);
-      this.host.ensureReady();
+      this.ensureReadyToSend();
       throw error;
     }
   }
@@ -530,7 +543,7 @@ export class WwebjsMessaging {
     // The lookup is an await a teardown can land in, and resolveSendId answers a failed lookup with the
     // unresolved id. The reply and forward legs send through the Message's own client, which the host's
     // readiness check on getClient never sees, so a send must not leave for a closing page from here.
-    this.host.ensureReady();
+    this.ensureReadyToSend();
     try {
       return await send(to);
     } catch (err) {
@@ -593,7 +606,7 @@ export class WwebjsMessaging {
     mentions?: string[],
     options?: { linkPreview?: boolean; customPreview?: CustomLinkPreview } & Quotable,
   ): Promise<MessageResult> {
-    this.host.ensureReady();
+    this.ensureReadyToSend();
     // wwebjs accepts neutral `<phone>@c.us` WIDs directly as mentionedJidList, so no de-normalization
     // is needed. Omit the options object entirely when none are given to keep today's send behavior.
     //
@@ -663,7 +676,7 @@ export class WwebjsMessaging {
     extraOptions?: { sendAudioAsVoice?: boolean; sendMediaAsDocument?: boolean },
     fallbackType?: string,
   ): Promise<MessageResult> {
-    this.host.ensureReady();
+    this.ensureReadyToSend();
     this.host.ensureNotChannelRecipient(chatId);
 
     // Build the media once (a remote URL is fetched here); sendResolved may retry the send itself.
@@ -691,7 +704,7 @@ export class WwebjsMessaging {
   }
 
   async sendLocationMessage(chatId: string, location: LocationInput): Promise<MessageResult> {
-    this.host.ensureReady();
+    this.ensureReadyToSend();
     ensureSendable(chatId, 'location');
     // Import Location class dynamically from whatsapp-web.js
     const module = await import('whatsapp-web.js');
@@ -710,7 +723,7 @@ export class WwebjsMessaging {
   }
 
   async sendContactMessage(chatId: string, contact: ContactCard): Promise<MessageResult> {
-    this.host.ensureReady();
+    this.ensureReadyToSend();
     ensureSendable(chatId, 'contact card');
     // Shared builder sanitizes name/number (strips CR/LF, digits-only waid) so a crafted contact
     // can't inject extra vCard fields — the previous inline build interpolated raw values.
@@ -729,7 +742,7 @@ export class WwebjsMessaging {
   }
 
   async sendStickerMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
-    this.host.ensureReady();
+    this.ensureReadyToSend();
     // Sticker has its own send path (sendMediaAsSticker), not the sendMediaMessage funnel, but it
     // hits the same channel crash: for a channel wwjs drops the sticker form and runs processMediaData
     // with sendToChannel, which still ends at msg.avParams() (Utils.js:518). Guard it too (#673).
@@ -755,7 +768,7 @@ export class WwebjsMessaging {
   }
 
   async sendPollMessage(chatId: string, poll: PollInput): Promise<MessageResult> {
-    this.host.ensureReady();
+    this.ensureReadyToSend();
     ensureSendable(chatId, 'poll');
     // Import Poll dynamically like Location; the .default fallback covers builds where the
     // classes land on module.default (a plain `module.Poll` would be undefined there and
@@ -782,7 +795,7 @@ export class WwebjsMessaging {
   }
 
   async replyToMessage(chatId: string, quotedMsgId: string, text: string, mentions?: string[]): Promise<MessageResult> {
-    this.host.ensureReady();
+    this.ensureReadyToSend();
     ensureSendable(chatId, 'reply');
     try {
       // Find the message to quote
@@ -815,7 +828,7 @@ export class WwebjsMessaging {
   }
 
   async forwardMessage(fromChatId: string, toChatId: string, messageId: string): Promise<MessageResult> {
-    this.host.ensureReady();
+    this.ensureReadyToSend();
     try {
       const chat = await this.readBeforeSend('forwardMessage', () => this.client().getChatById(fromChatId));
       if (!chat) {
@@ -839,6 +852,7 @@ export class WwebjsMessaging {
       // older history in before the second read, and those messages are older than every one loaded.
       let resolvedTo = toChatId;
       let before = undefined as { ids: Set<string>; newest: number } | undefined;
+      let attempted = false;
       await this.sendResolved(toChatId, async to => {
         resolvedTo = to;
         before = undefined;
@@ -857,8 +871,11 @@ export class WwebjsMessaging {
           this.host.logger.warn(`Could not read the destination chat before forwarding: ${String(error)}`);
         }
         // The read above is a page round trip a teardown can land in. Its failure only leaves the copy
-        // unidentified, unless it shows the page is gone, which this check then refuses.
-        this.host.ensureReady();
+        // unidentified, unless it shows the page is gone, which this check then refuses. Before the first
+        // attempt nothing was forwarded, so that refusal frees a keyed send's key; a retry's may follow a copy.
+        if (attempted) this.host.ensureReady();
+        else this.ensureReadyToSend();
+        attempted = true;
         return msgToForward.forward(to);
       });
 
