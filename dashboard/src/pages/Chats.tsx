@@ -318,8 +318,10 @@ export function Chats() {
 
   // The media viewer holds the message it shows by the key the thread merges by (waMessageId ?? id, kept when a refetch
   // swaps a live row for its stored one), never by list position: the image list is rebuilt from the live thread. An
-  // image still being sent is held under its placeholder's temp_ id; the confirmed row that replaces it keeps the
-  // placeholder's createdAt (ChatComposer spreads it), which is how the viewer follows it to its real key.
+  // image still being sent is held under its placeholder's temp_ id, and ChatComposer reports the real key once the
+  // send is confirmed (an echo of the send can restamp the row's createdAt before the page draws it). A viewer
+  // opened on the placeholder after that report finds the confirmed row by the placeholder's createdAt, which the
+  // composer spreads into it.
   const [lightbox, setLightbox] = useState<ViewedImage | null>(null);
 
   const [replyingTo, setReplyingTo] = useState<ChatMessageView | null>(null);
@@ -2204,6 +2206,7 @@ export function Chats() {
                   setReplyingTo={setReplyingTo}
                   onMessageAppended={onMessageAppended}
                   onSent={promoteSentChat}
+                  onSendConfirmed={(tempId, key) => setLightbox(v => (v?.key === tempId ? { ...v, key } : v))}
                   messageInput={messageInput}
                   setMessageInput={setMessageInput}
                   attachment={attachment}

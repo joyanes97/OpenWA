@@ -190,6 +190,8 @@ let firstPageExtra: ChatMessage[] = [];
 let sendTextId = 'wamid.out.1';
 // The id an image send answers with; '' as whatsapp-web.js answers when it cannot read the sent id back.
 let sendImageId = 'wamid.out.image';
+// Set by a test whose image send the gateway refuses.
+let sendImageFails = false;
 
 function holdSend(): () => void {
   let release!: () => void;
@@ -379,7 +381,10 @@ function installFetchStub(): void {
       return Promise.resolve(jsonResponse({ messageId: 'wamid.out.audio', timestamp: 1_700_000_100 }));
     }
     if (method === 'POST' && path === `/api/sessions/${SESSION.id}/messages/send-image`) {
-      const send = () => jsonResponse({ messageId: sendImageId, timestamp: 1_700_000_100 });
+      const send = () =>
+        sendImageFails
+          ? jsonResponse({ message: 'boom' }, 500)
+          : jsonResponse({ messageId: sendImageId, timestamp: 1_700_000_100 });
       return sendGate ? sendGate.then(send) : Promise.resolve(send());
     }
     if (method === 'POST' && path === `/api/sessions/${SESSION.id}/messages/send-document`) {
@@ -458,6 +463,7 @@ afterEach(async () => {
   firstPageExtra = [];
   sendTextId = 'wamid.out.1';
   sendImageId = 'wamid.out.image';
+  sendImageFails = false;
   olderPageFails = false;
   olderPageExtra = [];
   chatsResponder = null;
@@ -4750,4 +4756,76 @@ test('a file sent alone with a mouse click on Send leaves focus in the message f
 
 test('a key on Send after an earlier tap on it leaves focus in the message field', async () => {
   assert.equal(await sendFileAlone('key', true), 'Type a message...');
+});
+
+// The answer to a send and the echo of it reach the page close together. The client library tells the page about a
+// cache change on its next timer turn, so an echo frame handled before that turn lands in the same render as the
+// answer: the page never draws the confirmed row with the placeholder's time before the echo restamps it.
+test('the media viewer stays on an image being sent when its echo lands right after its answer', async t => {
+  const { waitFor } = rtl;
+  const { thread, src, release } = await viewImageBeingSent(t);
+  const cache = queryClient!.getQueryCache();
+  let echoed = false;
+  const unsubscribe = cache.subscribe(() => {
+    if (echoed) return;
+    const confirmed = cache
+      .findAll({ queryKey: ['messages', SESSION.id, CHAT.id] })
+      .some(q =>
+        ((q.state.data as { pages?: Array<{ db: ChatMessage[] }> } | undefined)?.pages ?? []).some(page =>
+          page.db.some(m => m.waMessageId === 'wamid.out.image'),
+        ),
+      );
+    if (!confirmed) return;
+    echoed = true;
+    receiveEvent('message.sent', {
+      id: 'wamid.out.image',
+      chatId: CHAT.id,
+      from: 'me',
+      to: CHAT.id,
+      body: '',
+      type: 'image',
+      fromMe: true,
+      timestamp: 1_700_000_100,
+    });
+  });
+  t.after(unsubscribe);
+
+  release();
+  await waitFor(() => assert.ok(thread.querySelector('[data-wa-message-id="wamid.out.image"] img.chat-image-media')));
+  await flush();
+  assert.equal(echoed, true, 'the echo was not delivered');
+  assert.equal(viewerSlideSrc(), src, 'the viewer closed by itself when the send it showed was confirmed');
+});
+
+test('the media viewer stays on an image whose send failed', async t => {
+  const { waitFor } = rtl;
+  sendImageFails = true;
+  const { thread, src, release } = await viewImageBeingSent(t);
+
+  release();
+  await waitFor(() => assert.ok(thread.querySelector('.message-status-icon.failed'), 'the send was not marked failed'));
+  await flush();
+  assert.equal(viewerSlideSrc(), src, 'the viewer closed when the send of its image failed');
+});
+
+test('a confirmed image send leaves the media viewer on the other image it shows', async t => {
+  const { screen, fireEvent, waitFor } = rtl;
+  t.mock.method(URL, 'createObjectURL', () => 'blob:staged-preview');
+  t.mock.method(URL, 'revokeObjectURL', () => undefined);
+  firstPageExtra = [inlineImage('a', 10)];
+  const { container } = renderChats();
+  fireEvent.click(await screen.findByText('Alice'));
+  const thread = container.querySelector('.room-messages') as HTMLElement;
+  await waitFor(() => assert.ok(thread.querySelector('img.chat-image-media[src="http://localhost/media/a.png"]')));
+  await stageAttachment(container, 'photo.png', 'image/png');
+  const release = holdSend();
+  fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+  await waitFor(() => assert.ok(thread.querySelector('img.chat-image-media[src^="data:image/png"]')));
+  fireEvent.click(thread.querySelector('img.chat-image-media[src="http://localhost/media/a.png"]') as HTMLElement);
+  await waitFor(() => assert.equal(viewerSlideSrc(), 'http://localhost/media/a.png'));
+
+  release();
+  await waitFor(() => assert.ok(thread.querySelector('[data-wa-message-id="wamid.out.image"] img.chat-image-media')));
+  await flush();
+  assert.equal(viewerSlideSrc(), 'http://localhost/media/a.png', 'the viewer left its image when a send was confirmed');
 });

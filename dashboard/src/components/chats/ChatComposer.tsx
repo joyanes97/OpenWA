@@ -37,6 +37,8 @@ interface ChatComposerProps {
   onMessageAppended: (direction: ScrollDirection) => void;
   /** Moves the chat to the top of the sidebar, if `sessionId` is still the session on screen. */
   onSent: (sessionId: string, chatId: string, snippet: string, sentAt: number) => void;
+  /** A send was confirmed: the placeholder `tempId` is now the thread row keyed `key` (its waMessageId ?? id). */
+  onSendConfirmed?: (tempId: string, key: string) => void;
   messageInput: string;
   setMessageInput: Dispatch<SetStateAction<string>>;
   attachment: StagedAttachment | null;
@@ -56,6 +58,7 @@ function ChatComposer({
   setReplyingTo,
   onMessageAppended,
   onSent,
+  onSendConfirmed,
   messageInput,
   setMessageInput,
   attachment,
@@ -300,6 +303,7 @@ function ChatComposer({
         status: 'sent',
       };
       upsertCachedMessage(queryClient, sendKey, reconciled, { dropId: tempId });
+      onSendConfirmed?.(tempId, reconciled.waMessageId ?? reconciled.id);
 
       // Update sidebar chat list (move active chat to the top with the new snippet)
       // Named by the type the bubble uses, not the MIME major type: a PDF is a document, not "application".
