@@ -2557,7 +2557,7 @@ The `Contact` object returned by the list and get-by-id routes has this shape:
 }
 ```
 
-`name`, `pushName`, and `profilePicUrl` are optional and may be absent. `profilePicUrl` is a cached URL that only Baileys can fill (whatsapp-web.js never sets it), and it is often absent there too, so its absence says nothing about whether the contact has a picture; use `GET /api/sessions/:sessionId/contacts/:contactId/profile-picture` for that.
+`name`, `pushName`, and `profilePicUrl` are optional and may be absent. `number` is MSISDN digits for a `<phone>@c.us` contact. For a `<lid>@lid` contact it depends on the engine: Baileys carries the phone's digits when the phone is known and an empty string when it is not; whatsapp-web.js carries the lid's digits, which are not a phone number. `profilePicUrl` is a cached URL that only Baileys can fill (whatsapp-web.js never sets it), and it is often absent there too, so its absence says nothing about whether the contact has a picture; use `GET /api/sessions/:sessionId/contacts/:contactId/profile-picture` for that.
 
 #### GET /api/sessions/:sessionId/contacts
 
@@ -2939,6 +2939,8 @@ Raw object (no envelope). `engine.getGroupInfo()` returns `GroupInfo | null`; th
   ]
 }
 ```
+
+A participant's `number` is MSISDN digits for a `<phone>@c.us` id. For a `<lid>@lid` participant it carries the lid's digits on both engines, which are not a phone number.
 
 **Errors:** `400` session is not started · `401` missing/invalid `X-API-Key` · `403` a key restricted to selected chats names a group outside its allowlist · `404` `Group <groupId> not found` · `409` conflict or engine not ready (retryable) · `503` session not ready or dependency unavailable (retryable); on Baileys, also when WhatsApp rate-limits or times out the request (code 429 or 408): retry after a pause
 

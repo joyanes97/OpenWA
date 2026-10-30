@@ -767,7 +767,11 @@ export interface ContactRecord {
   id: Jid;
   /** The name from the account's own addressbook. Absent for a contact that was never saved. */
   name?: string;
-  /** MSISDN digits, without a leading + or any separators. */
+  /**
+   * MSISDN digits, without a leading + or any separators, for a `<phone>@c.us` contact. For a `<lid>@lid`
+   * contact it depends on the engine: Baileys carries the phone's digits when the phone is known and an empty
+   * string when it is not; whatsapp-web.js carries the lid's digits, which are not a phone number.
+   */
   number: string;
   /** The name the contact set on their own account. Both engines emit this as `pushName`. */
   pushName?: string;

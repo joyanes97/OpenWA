@@ -27,7 +27,13 @@ export class ContactDto {
   })
   pushName?: string;
 
-  @ApiProperty({ description: 'MSISDN digits, without a leading + or any separators.', example: '628123456789' })
+  @ApiProperty({
+    description:
+      'MSISDN digits, without a leading + or any separators, for a `<phone>@c.us` contact. For a `<lid>@lid` ' +
+      "contact it depends on the engine: Baileys carries the phone's digits when the phone is known and an empty " +
+      "string when it is not; whatsapp-web.js carries the lid's digits, which are not a phone number.",
+    example: '628123456789',
+  })
   number!: string;
 
   @ApiProperty({ description: "Whether the entry exists in the account's addressbook.", example: true })

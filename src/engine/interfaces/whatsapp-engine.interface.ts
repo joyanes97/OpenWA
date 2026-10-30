@@ -253,6 +253,10 @@ export interface Contact {
   id: string;
   name?: string;
   pushName?: string;
+  /**
+   * MSISDN digits for a `<phone>@c.us` id. For a `<lid>@lid` id: Baileys gives the phone's digits when the phone is
+   * known and '' when it is not; whatsapp-web.js gives the lid's digits, which are not a phone number.
+   */
   number: string;
   isMyContact: boolean;
   isBlocked: boolean;
@@ -270,6 +274,7 @@ export interface Group {
 
 export interface GroupParticipant {
   id: string;
+  /** MSISDN digits for a `<phone>@c.us` id; the lid's digits (not a phone number) for a `<lid>@lid` id. */
   number: string;
   name?: string;
   isAdmin: boolean;
