@@ -657,3 +657,125 @@ const hasTool = (tool: string): boolean => spawnSync('sh', ['-c', `command -v ${
     );
   },
 );
+
+/**
+ * On PostgreSQL 12 and older gen_random_uuid() is pgcrypto's, and the migrations call it unqualified. A pgcrypto a
+ * platform installed in a schema of its own, off the connection's search_path, passes the presence check, so a fresh
+ * install has to stop with the schema and the fix named rather than with "function gen_random_uuid() does not exist".
+ * From 13 on the function is core and the same layouts boot. A database that ran the chain keeps booting after
+ * pgcrypto moves: its defaults are bound to the function, not to its name, and no pending migration asks for it.
+ * Written for PostgreSQL 12 as well (no DROP DATABASE ... WITH (FORCE)).
+ */
+(POSTGRES_ENABLED ? describe : describe.skip)('boot with pgcrypto in a schema off the search_path', () => {
+  const connection = {
+    host: process.env.DATABASE_HOST || 'localhost',
+    port: Number(process.env.DATABASE_PORT || 5432),
+    username: process.env.DATABASE_USERNAME || 'openwa',
+    password: process.env.DATABASE_PASSWORD || 'openwa',
+  };
+  const database = `pgcrypto_elsewhere_${process.pid}`;
+  const REFUSAL =
+    /pgcrypto extension, which is installed in schema "extensions".*ALTER EXTENSION pgcrypto SET SCHEMA public/;
+  let admin: DataSource;
+  let serverVersion: number;
+
+  const dropDatabase = async (): Promise<void> => {
+    await admin.query(
+      `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()`,
+      [database],
+    );
+    await admin.query(`DROP DATABASE IF EXISTS "${database}"`);
+  };
+
+  const onDatabase = async (...statements: string[]): Promise<void> => {
+    const setup = await new DataSource({ type: 'postgres', ...connection, database }).initialize();
+    try {
+      for (const statement of statements) await setup.query(statement);
+    } finally {
+      await setup.destroy();
+    }
+  };
+
+  // The options app.module.ts hands createBootDataSource for the data connection.
+  const boot = (schema: string): Promise<DataSource> =>
+    createBootDataSource({
+      type: 'postgres',
+      ...connection,
+      database,
+      migrations: [path.join(__dirname, '..', '*{.ts,.js}')],
+      ...(schema !== 'public' ? { schema, extra: { options: `-c search_path=${schema},public` } } : {}),
+    });
+
+  const bootAndInsert = async (schema: string): Promise<void> => {
+    const app = await boot(schema);
+    try {
+      const [row] = await app.query<Array<{ id: string }>>(
+        `INSERT INTO sessions (name, status, config) VALUES ('one', 'disconnected', '{}') RETURNING id`,
+      );
+      expect(row.id).toMatch(/^[0-9a-f-]{36}$/);
+    } finally {
+      await app.destroy();
+    }
+  };
+
+  beforeAll(async () => {
+    admin = await new DataSource({
+      type: 'postgres',
+      ...connection,
+      database: process.env.DATABASE_NAME || 'openwa',
+    }).initialize();
+    const [{ num }] = await admin.query<Array<{ num: number }>>(
+      `SELECT current_setting('server_version_num')::int AS num`,
+    );
+    serverVersion = num;
+  });
+
+  beforeEach(async () => {
+    await dropDatabase();
+    await admin.query(`CREATE DATABASE "${database}"`);
+  });
+
+  afterAll(async () => {
+    await dropDatabase();
+    await admin.destroy();
+  });
+
+  it.each([
+    ['public', 'the server default'],
+    ['app', 'a database search_path that names the extension schema, which the app schema replaces'],
+  ])(
+    'a fresh install with POSTGRES_SCHEMA=%s and %s: refused naming the schema before 13, boots from 13',
+    async schema => {
+      await onDatabase(
+        'CREATE SCHEMA extensions',
+        'CREATE EXTENSION pgcrypto WITH SCHEMA extensions',
+        ...(schema !== 'public'
+          ? [`CREATE SCHEMA ${schema}`, `ALTER DATABASE "${database}" SET search_path = "$user", public, extensions`]
+          : []),
+      );
+      if (serverVersion < 130000) {
+        await expect(boot(schema)).rejects.toThrow(REFUSAL);
+        // The fix the message names.
+        await onDatabase('ALTER EXTENSION pgcrypto SET SCHEMA public');
+      }
+      await bootAndInsert(schema);
+    },
+    180_000,
+  );
+
+  it('a fresh install whose database search_path reaches the extension schema boots', async () => {
+    await onDatabase(
+      'CREATE SCHEMA extensions',
+      'CREATE EXTENSION pgcrypto WITH SCHEMA extensions',
+      `ALTER DATABASE "${database}" SET search_path = "$user", public, extensions`,
+    );
+    await bootAndInsert('public');
+  }, 120_000);
+
+  it('a migrated database whose pgcrypto moved off the search_path still boots and fills ids', async () => {
+    await onDatabase('CREATE EXTENSION pgcrypto WITH SCHEMA public');
+    await (await boot('public')).destroy();
+    await onDatabase('CREATE SCHEMA extensions', 'ALTER EXTENSION pgcrypto SET SCHEMA extensions');
+    await bootAndInsert('public');
+  }, 180_000);
+});

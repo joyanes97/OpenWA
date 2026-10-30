@@ -125,6 +125,10 @@ POSTGRES_SCHEMA=public   # Default behavior (historical)
 - The dashboard built-in database (`POSTGRES_BUILTIN=true`) always uses `public`
 - External/managed PostgreSQL: run `CREATE SCHEMA <name>;` once before first startup
 - SQLite ignores this setting
+- On PostgreSQL 12 or older, `gen_random_uuid()` comes from `pgcrypto`, which must live in this schema or in
+  `public`. A migration that needs it and finds it in another schema stops the boot and names that schema; a superuser
+  moves it with `ALTER EXTENSION pgcrypto SET SCHEMA public;`, after which anything else that calls it under the old
+  schema name must use `public`
 - `scripts/backup.sh` dumps a schema other than `public` alone, with the `pg_trgm` and `unaccent` extensions, and
   `pgcrypto` only when it lives in that schema (PostgreSQL 12 or older, where the migrations create it there for the
   id defaults), so a database shared with other applications is neither read nor restored past it. That dump needs
