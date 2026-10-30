@@ -550,14 +550,14 @@
     "unlink": {
       "title": "Gerät trennen",
       "message": "Sitzung <strong>\"{{name}}\"</strong> vom WhatsApp-Konto trennen?",
-      "warning": "WhatsApp entfernt dieses Gerät aus den verknüpften Geräten des Kontos und die Sitzung wird beendet. Für eine erneute Verbindung ist ein neuer QR-Code oder Kopplungscode erforderlich. Um auch alle lokalen Daten zu löschen, löschen Sie die Sitzung anschließend.",
+      "warning": "WhatsApp entfernt dieses Gerät aus den verknüpften Geräten des Kontos und die Sitzung wird beendet. Für eine erneute Verbindung ist ein neuer QR-Code oder Kopplungscode erforderlich. Um auch alle lokalen Daten zu löschen, lösche die Sitzung anschließend.",
       "confirm": "Trennen",
       "successTitle": "Gerät getrennt",
       "success": "Trennung abgeschlossen: Das Gerät wurde abgemeldet und die lokalen Sitzungsdaten wurden gelöscht. Zum erneuten Verbinden ist ein neuer QR-Scan oder Kopplungscode erforderlich.",
       "failedTitle": "Trennen fehlgeschlagen",
       "failed": "Die Sitzung konnte nicht getrennt werden.",
       "incompleteTitle": "Trennung unvollständig",
-      "incomplete": "Die Sitzung wurde lokal beendet, aber der Abmeldevorgang ist unvollständig — das Gerät ist möglicherweise noch verknüpft. Starten Sie die Sitzung und wiederholen Sie die Trennung."
+      "incomplete": "Die Sitzung wurde lokal beendet, aber der Abmeldevorgang ist unvollständig — das Gerät ist möglicherweise noch verknüpft. Starte die Sitzung und wiederhole die Trennung."
     },
     "pairing": {
       "tabQr": "QR-Code",
@@ -580,7 +580,7 @@
     },
     "start": {
       "teardownPendingTitle": "Sitzung wird gestartet",
-      "teardownPending": "Ein Anmeldedatenabbau für diese Sitzung läuft noch. Warten Sie einen Moment und versuchen Sie es erneut.",
+      "teardownPending": "Ein Anmeldedatenabbau für diese Sitzung läuft noch. Warte einen Moment und versuche es erneut.",
       "errorTitle": "Start fehlgeschlagen"
     },
     "restriction": {
@@ -674,7 +674,7 @@
       "message.received": "Wenn eine Nachricht empfangen wird",
       "message.sent": "Wenn eine Nachricht gesendet wird",
       "message.ack": "Wenn sich der Zustell- oder Lesestatus einer Nachricht ändert",
-      "message.receipt": "Jeder Empfänger, der eine von Ihnen gesendete Gruppen- oder Statusnachricht erhält, liest oder abspielt (nur Baileys; nicht in * enthalten)",
+      "message.receipt": "Jeder Empfänger, der eine von dir gesendete Gruppen- oder Statusnachricht erhält, liest oder abspielt (nur Baileys; nicht in * enthalten)",
       "message.failed": "Wenn eine ausgehende Nachricht nicht zugestellt werden kann",
       "message.revoked": "Wenn eine Nachricht für alle gelöscht wird",
       "message.reaction": "Wenn eine Reaktion hinzugefügt, geändert oder entfernt wird",
@@ -835,7 +835,7 @@
     },
     "sessions": {
       "label": "Sitzungszugriff",
-      "hint": "Wählen Sie die Sitzungen, die dieser Schlüssel nutzen darf.",
+      "hint": "Wähle die Sitzungen, die dieser Schlüssel nutzen darf.",
       "all": "Alle Sitzungen",
       "empty": "Noch keine Sitzungen. Dieser Schlüssel kann auf alle zugreifen, sobald welche existieren.",
       "restricted": "{{count}} ausgewählt",
@@ -1115,7 +1115,7 @@
       "start": "Batch-Prüfung starten",
       "stop": "Prüfung stoppen",
       "export": "Ergebnisse exportieren (CSV)",
-      "exportHint": "Die Datei enthält jede Ziffer. Eine Tabellenkalkulation zeigt lange Nummern eventuell als 9.19612E+11 an oder entfernt eine führende Null; importieren Sie die Datei und stellen Sie die Spalte Phone Number auf Text, damit die Nummern unverändert bleiben.",
+      "exportHint": "Die Datei enthält jede Ziffer. Eine Tabellenkalkulation zeigt lange Nummern eventuell als 9.19612E+11 an oder entfernt eine führende Null; importiere die Datei und stelle die Spalte Phone Number auf Text, damit die Nummern unverändert bleiben.",
       "stoppedTitle": "Batch gestoppt",
       "checked": "Geprüft",
       "remaining": "Verbleibend",
@@ -1228,7 +1228,7 @@
     },
     "envPinNote": "Durch die Umgebungsvariable {{name}} festgelegt — dies ist der aktuell verwendete Wert. Änderungen im Dashboard werden erst wirksam, wenn diese Variable entfernt wird.",
     "envPinFlagNote": "Durch die Umgebungsvariable {{name}} festgelegt: Solange sie auf true steht und dieser Dienst verwendet wird, startet der integrierte Container bei jedem Serverstart, auch wenn dieser Schalter aus ist.",
-    "pendingRestartNote": "Gespeichert, aber noch nicht übernommen — starten Sie den Server neu, damit diese Änderung wirksam wird.",
+    "pendingRestartNote": "Gespeichert, aber noch nicht übernommen — starte den Server neu, damit diese Änderung wirksam wird.",
     "pendingBuiltInNote": "Gespeichert, aber noch nicht übernommen: Der Server läuft derzeit mit einem externen Dienst, ein Neustart wechselt zum integrierten Container.",
     "pendingExternalNote": "Gespeichert, aber noch nicht übernommen: Der Server läuft derzeit mit dem integrierten Container, ein Neustart wechselt zu einem externen Dienst.",
     "migration": {
@@ -1324,8 +1324,8 @@
       "trustWarning": "Plugins laufen mit den vollen Prozessrechten des Gateways — die Sandbox fängt Abstürze ab, keinen Schadcode. Installiere nur Plugins, denen du vertraust.",
       "choose": "ZIP-Datei auswählen…",
       "tooLarge": "Die Datei überschreitet das Limit von 5 MB.",
-      "catalogHint": "Installieren Sie direkt aus dem OpenWA-Plugin-Katalog. Die .zip-Datei wird serverseitig durch den SSRF-Schutz abgerufen, dann validiert und in einer Sandbox ausgeführt.",
-      "catalogTeaser": "Sie suchen Plugins?",
+      "catalogHint": "Installiere direkt aus dem OpenWA-Plugin-Katalog. Die .zip-Datei wird serverseitig durch den SSRF-Schutz abgerufen, dann validiert und in einer Sandbox ausgeführt.",
+      "catalogTeaser": "Suchst du Plugins?",
       "catalogTeaserSuffix": "durchstöbert den offiziellen Marktplatz.",
       "tabCatalog": "Katalog",
       "tabUpload": ".zip hochladen"
@@ -1434,7 +1434,7 @@
       "install": "Installieren",
       "installed": "Installiert",
       "noDownload": "Dieser Katalogeintrag hat keine Download-URL.",
-      "noMatch": "Keine Plugins entsprechen Ihrer Suche.",
+      "noMatch": "Keine Plugins entsprechen deiner Suche.",
       "searchPlaceholder": "Plugins suchen…",
       "update": "Aktualisieren",
       "updateAvailable": "Update verfügbar",
