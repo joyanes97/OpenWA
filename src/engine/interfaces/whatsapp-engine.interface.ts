@@ -945,6 +945,12 @@ export interface EngineEventCallbacks {
   onQRCode?: (qr: string) => void;
   onReady?: (phone: string, pushName: string) => void;
   /**
+   * Fired while ready when the account's own push name becomes known or changes, with the new non-empty
+   * name. Baileys only: a newly linked account's name syncs after the connection opened, so its `onReady`
+   * carried an empty one. whatsapp-web.js knows the name at ready and never fires it.
+   */
+  onPushNameChanged?: (pushName: string) => void;
+  /**
    * Set only where a downloaded payload outlives the emit (PostgreSQL writes asynchronously). The
    * engine calls it synchronously as each live message arrives, in arrival order, and passes the
    * ticket to the emit, or drops it when the message is not emitted. `needsRoom` says whether the

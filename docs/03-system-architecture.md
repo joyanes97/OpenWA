@@ -917,6 +917,7 @@ export enum EngineStatus {
 export interface EngineEventCallbacks {
   onQRCode?: (qr: string) => void;
   onReady?: (phone: string, pushName: string) => void;
+  onPushNameChanged?: (pushName: string) => void; // the account's own name synced after onReady (Baileys)
   admitInbound?: (arrival: {
     id: string;
     chatId: string;
