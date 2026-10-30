@@ -297,6 +297,13 @@ export class SessionController {
       'session the owner is running, OR ownership changes while deletion runs. The first two refusals ' +
       'remove nothing. Ownership loss stops later deletion units; earlier batches may already be committed.',
   })
+  @ApiResponse({
+    status: 503,
+    description:
+      'The session could not be claimed for the delete because the database did not answer (nothing is ' +
+      'deleted), or, on SQLite, another database transaction stayed open for 10 s before a delete ' +
+      'transaction (no further rows are removed). Retry the delete.',
+  })
   async delete(@Param('sessionId', ParseUUIDPipe) id: string): Promise<void> {
     const session = await this.sessionService.findOne(id);
     await this.sessionService.delete(id);
