@@ -2,7 +2,7 @@ import { once } from 'events';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { PassThrough, Writable } from 'stream';
+import { PassThrough, Readable, Writable } from 'stream';
 import { setTimeout as realSleep } from 'timers/promises';
 import { ConfigService } from '@nestjs/config';
 
@@ -23,7 +23,7 @@ jest.mock('@aws-sdk/client-s3', () => {
 });
 
 import { GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
-import { S3_SOCKET_TIMEOUT_MS, StorageService } from './storage.service';
+import { S3_READER_IDLE_MS, S3_SOCKET_TIMEOUT_MS, StorageService } from './storage.service';
 import { sweepOrphanedFiles } from './orphan-sweep';
 
 const ENV_KEYS = ['S3_ENDPOINT', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY', 'S3_BUCKET', 'S3_KEY_PREFIX'];
@@ -45,6 +45,22 @@ function within<T>(work: Promise<T>, deadlineMs = 5_000): Promise<T | 'pending'>
 function s3Error(name: string): Error {
   return Object.assign(new Error(name), { name });
 }
+
+/** A store that always has more to send: the body is topped up whenever it has room, and never ends. */
+function sendWithoutEnd(body: PassThrough): void {
+  const topUp = (): void => {
+    let room = true;
+    while (room) room = body.write(Buffer.alloc(16 * 1024, 1));
+    body.once('drain', topUp);
+  };
+  topUp();
+}
+
+/** How far apart a slow HTTP client's pulls come: it takes only once the socket buffers ahead of it have room. */
+const SLOW_PULL_GAP_MS = 3 * S3_SOCKET_TIMEOUT_MS;
+
+/** True once the stream holds as much as it buffers: its reader, not the store, is behind. */
+const heldBack = (stream: Readable): boolean => stream.readableLength >= stream.readableHighWaterMark;
 
 describe('StorageService S3 bounds after the response headers', () => {
   let tmpRoot: string;
@@ -139,6 +155,81 @@ describe('StorageService S3 bounds after the response headers', () => {
     expect(await within(ended)).not.toBe('pending');
     expect(errors).toEqual([]);
     expect(Buffer.concat(received)).toHaveLength(4 * 1024);
+    expect(await until(() => openDownloads(svc) === 0)).toBe(true);
+  });
+
+  it('never cuts a download whose reader takes in bursts further apart than the store bound', async () => {
+    const svc = await s3Storage();
+    const { stream } = await svc.openFile('statuses/s1/slow-reader.mp4');
+    const errors: Error[] = [];
+    stream.on('error', (error: Error) => errors.push(error));
+    sendWithoutEnd(bodies[0]);
+
+    // Pulls each further apart than the store bound, past the reader bound in all.
+    for (let i = 0; i <= Math.ceil(S3_READER_IDLE_MS / SLOW_PULL_GAP_MS); i++) {
+      expect(await until(() => heldBack(stream))).toBe(true);
+      await jest.advanceTimersByTimeAsync(SLOW_PULL_GAP_MS);
+      expect(stream.destroyed).toBe(false);
+      expect((stream.read() as Buffer).length).toBeGreaterThan(0);
+    }
+
+    expect(errors).toEqual([]);
+    expect(openDownloads(svc)).toBe(1);
+  });
+
+  it('fails a download whose reader takes nothing for the reader bound, and frees its place', async () => {
+    const svc = await s3Storage();
+    const { stream } = await svc.openFile('statuses/s1/stopped-reader.mp4');
+    const failed = once(stream, 'error');
+    sendWithoutEnd(bodies[0]);
+    expect(await until(() => heldBack(stream))).toBe(true);
+
+    await jest.advanceTimersByTimeAsync(S3_READER_IDLE_MS - 1);
+    expect(stream.destroyed).toBe(false);
+    expect(openDownloads(svc)).toBe(1);
+
+    await jest.advanceTimersByTimeAsync(1);
+    const outcome = await within(failed);
+    expect(outcome === 'pending' ? outcome : (outcome[0] as Error).name).toBe('TimeoutError');
+    expect(await until(() => bodies[0].destroyed && openDownloads(svc) === 0)).toBe(true);
+  });
+
+  it('keeps the tail for a slow reader once the store has sent the last byte', async () => {
+    const svc = await s3Storage();
+    const { stream } = await svc.openFile('statuses/s1/tail.mp4');
+    const errors: Error[] = [];
+    stream.on('error', (error: Error) => errors.push(error));
+    // More than the stream buffers on its readable side, less than it takes in before the store is paused.
+    const size = stream.readableHighWaterMark * 1.5;
+    for (let sent = 0; sent < size; sent += 16 * 1024) bodies[0].write(Buffer.alloc(16 * 1024, 2));
+    bodies[0].end();
+    expect(await until(() => openDownloads(svc) === 0 && heldBack(stream))).toBe(true);
+
+    await jest.advanceTimersByTimeAsync(SLOW_PULL_GAP_MS);
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(chunk as Buffer);
+    expect(Buffer.concat(chunks)).toHaveLength(size);
+    expect(errors).toEqual([]);
+  });
+
+  it('fails a download whose store goes quiet for the idle bound once its reader has caught up', async () => {
+    const svc = await s3Storage();
+    const { stream } = await svc.openFile('statuses/s1/quiet-store.mp4');
+    const failed = once(stream, 'error');
+    bodies[0].write(Buffer.alloc(1024 * 1024, 3));
+    expect(await until(() => heldBack(stream))).toBe(true);
+    await jest.advanceTimersByTimeAsync(SLOW_PULL_GAP_MS);
+    expect(stream.destroyed).toBe(false);
+
+    let received = 0;
+    stream.on('data', (chunk: Buffer) => (received += chunk.length));
+    expect(await until(() => received === 1024 * 1024)).toBe(true);
+    await jest.advanceTimersByTimeAsync(S3_SOCKET_TIMEOUT_MS - 1);
+    expect(stream.destroyed).toBe(false);
+
+    await jest.advanceTimersByTimeAsync(1);
+    const outcome = await within(failed);
+    expect(outcome === 'pending' ? outcome : (outcome[0] as Error).name).toBe('TimeoutError');
     expect(await until(() => openDownloads(svc) === 0)).toBe(true);
   });
 
