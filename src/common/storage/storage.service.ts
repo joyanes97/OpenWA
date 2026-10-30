@@ -60,10 +60,18 @@ export const S3_PROBE_TIMEOUT_MS = 10_000;
  * forever, holding its media buffer and the caller. The socket bound is an idle timeout, so a long
  * upload or download that keeps moving bytes is not cut off. A bare requestTimeout would not do:
  * the HTTP handler only logs a warning when it expires. The HTTP handler stops applying the socket
- * bound once the response headers arrive, so an object body gets the same idle bound in openS3File.
+ * bound once the response headers arrive, so an object body gets the same idle bound in openS3File,
+ * and a listing page S3_LIST_TIMEOUT_MS.
  */
 export const S3_CONNECT_TIMEOUT_MS = 5_000;
 export const S3_SOCKET_TIMEOUT_MS = 30_000;
+
+/**
+ * Cap on one ListObjectsV2 page, the whole request. A page holds at most 1000 keys, a few hundred kilobytes,
+ * so a page that is moving has ample time, while one whose body stalls would hang an orphan sweep for good:
+ * its guarded interval skips every later tick while that run is pending.
+ */
+export const S3_LIST_TIMEOUT_MS = 30_000;
 
 /**
  * Downloads open at once on the stream client, the SDK's pool size. Each holds a pooled socket until its
@@ -472,6 +480,7 @@ export class StorageService implements OnModuleDestroy {
           Prefix: this.s3KeyRoot,
           ContinuationToken: continuationToken,
         }),
+        { abortSignal: AbortSignal.timeout(S3_LIST_TIMEOUT_MS) },
       );
 
       for (const obj of response.Contents ?? []) {
@@ -577,6 +586,7 @@ export class StorageService implements OnModuleDestroy {
           Prefix: `${this.s3KeyRoot}${prefix}`,
           ContinuationToken: continuationToken,
         }),
+        { abortSignal: AbortSignal.timeout(S3_LIST_TIMEOUT_MS) },
       );
 
       for (const obj of response.Contents ?? []) {

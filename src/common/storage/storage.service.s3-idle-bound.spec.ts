@@ -6,8 +6,8 @@ import { PassThrough, Writable } from 'stream';
 import { setTimeout as realSleep } from 'timers/promises';
 import { ConfigService } from '@nestjs/config';
 
-// The SDK is mocked: each test hands GetObject a body it drives itself.
-// Fake timers drive the bounds; what the streams do on their own is awaited in real time.
+// The SDK is mocked: each test hands GetObject a body it drives itself, and ListObjectsV2 a page that never
+// answers. Fake timers drive the bounds; what the streams do on their own is awaited in real time.
 const mockSend = jest.fn();
 jest.mock('@aws-sdk/client-s3', () => {
   const S3Client = jest.fn().mockImplementation(() => ({ send: mockSend }));
@@ -24,6 +24,7 @@ jest.mock('@aws-sdk/client-s3', () => {
 
 import { GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { S3_SOCKET_TIMEOUT_MS, StorageService } from './storage.service';
+import { sweepOrphanedFiles } from './orphan-sweep';
 
 const ENV_KEYS = ['S3_ENDPOINT', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY', 'S3_BUCKET', 'S3_KEY_PREFIX'];
 
@@ -39,6 +40,10 @@ async function until(condition: () => boolean, deadlineMs = 5_000): Promise<bool
 /** The work's outcome, or 'pending' once the deadline passes in real time. */
 function within<T>(work: Promise<T>, deadlineMs = 5_000): Promise<T | 'pending'> {
   return Promise.race([work, realSleep(deadlineMs, 'pending' as const, { ref: false })]);
+}
+
+function s3Error(name: string): Error {
+  return Object.assign(new Error(name), { name });
 }
 
 describe('StorageService S3 bounds after the response headers', () => {
@@ -197,5 +202,76 @@ describe('StorageService S3 bounds after the response headers', () => {
 
     await jest.advanceTimersByTimeAsync(S3_SOCKET_TIMEOUT_MS);
     expect(await within(failed)).toBe('TimeoutError');
+  });
+
+  describe('a ListObjectsV2 page that never answers', () => {
+    let listed: boolean;
+    let timeout: jest.SpyInstance;
+
+    beforeEach(() => {
+      listed = false;
+      mockSend.mockImplementation((cmd: unknown, options?: { abortSignal?: AbortSignal }) => {
+        if (!(cmd instanceof ListObjectsV2Command)) return Promise.resolve({});
+        listed = true;
+        return new Promise((_resolve, reject) => {
+          options?.abortSignal?.addEventListener('abort', () => reject(s3Error('AbortError')));
+        });
+      });
+      // AbortSignal.timeout runs on Node's internal timers, which fake timers do not reach.
+      timeout = jest.spyOn(AbortSignal, 'timeout').mockImplementation((ms: number) => {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), ms);
+        return controller.signal;
+      });
+    });
+
+    afterEach(() => timeout.mockRestore());
+
+    async function rejectsOnceItsTimeoutPasses(list: (svc: StorageService) => Promise<unknown>): Promise<void> {
+      const svc = await s3Storage();
+      timeout.mockClear();
+      const outcome = list(svc).then(
+        () => 'resolved',
+        (error: Error) => error.name,
+      );
+      expect(await until(() => listed)).toBe(true);
+      // The page request carries its own bound.
+      expect(timeout).toHaveBeenCalledTimes(1);
+      const [ms] = timeout.mock.calls[0] as [number];
+
+      await jest.advanceTimersByTimeAsync(ms - 1);
+      await expect(Promise.race([outcome, Promise.resolve('pending')])).resolves.toBe('pending');
+      await jest.advanceTimersByTimeAsync(1);
+      expect(await within(outcome)).toBe('AbortError');
+    }
+
+    it('rejects the listing', async () => {
+      await rejectsOnceItsTimeoutPasses(async svc => {
+        for await (const file of svc.iterateFiles()) void file;
+      });
+    });
+
+    it('rejects the file count', async () => {
+      await rejectsOnceItsTimeoutPasses(svc => svc.getFileCount());
+    });
+
+    it('rejects an orphan sweep, which deletes nothing, not even an orphan listed before the page', async () => {
+      fs.mkdirSync(path.join(localPath, 'statuses'), { recursive: true });
+      fs.writeFileSync(path.join(localPath, 'statuses', 'orphan.jpg'), 'x');
+      const deleteFile = jest.fn().mockResolvedValue(undefined);
+
+      await rejectsOnceItsTimeoutPasses(svc =>
+        sweepOrphanedFiles({
+          storage: { iterateFiles: (prefix, options) => svc.iterateFiles(prefix, options), deleteFile },
+          prefix: 'statuses/',
+          graceMs: 0,
+          now: 1000,
+          firstSeenAt: new Map(),
+          referencedAmong: () => Promise.resolve(new Set<string>()),
+          onDeleteFailed: jest.fn(),
+        }),
+      );
+      expect(deleteFile).not.toHaveBeenCalled();
+    });
   });
 });
