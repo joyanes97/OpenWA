@@ -1215,6 +1215,9 @@ export class SessionEngineLifecycle {
   private retryDisconnectAfterFailedRead(id: string, engine: IWhatsAppEngine, reason: string): void {
     const state = this.reconnectStates.get(id);
     if (!state || state.timer || this.closed || this.shutdownService?.isShuttingDown()) return;
+    // The read failed across an await, so a reconnect may have replaced this engine meanwhile. A retry armed
+    // for it would hold the episode's timer, and the live engine's own drop would then find the slot taken.
+    if (!this.isLiveEngine(id, engine)) return;
     const attempts = (state.readRetry?.attempts ?? 0) + 1;
     const delay = Math.min(state.baseDelay * 2 ** (attempts - 1), RECONNECT_BASE_DELAY_MAX_MS);
     const timer = setTimeout(() => {
