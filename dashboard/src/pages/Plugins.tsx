@@ -981,7 +981,10 @@ export default function Plugins() {
                             type="button"
                             className="plugin-update-chip"
                             title={`${t('plugins.catalog.updateAvailable', 'Update available')} (v${plugin.version} → v${updatesById.get(plugin.id)!.version})`}
-                            aria-label={t('plugins.catalog.updateAvailable', 'Update available')}
+                            aria-label={t('common.joinedName', {
+                              first: `v${updatesById.get(plugin.id)!.version}`,
+                              second: t('plugins.catalog.updateAvailable', 'Update available'),
+                            })}
                             onClick={() => {
                               // Land the user directly on this plugin's catalog entry, where the
                               // existing Update button (and its confirmation flow) lives.
