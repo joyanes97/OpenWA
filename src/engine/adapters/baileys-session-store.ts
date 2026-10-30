@@ -334,8 +334,11 @@ export class BaileysSessionStore {
   }
 
   upsertChats(records: Partial<Chat>[] = []): void {
+    // A phone's twins come from a walk of every lid mapping, and a history chunk can carry thousands of chats
+    // with a timer: their timer keys read one index of the mappings, built for the batch (the loop adds none).
+    const lidIndex = records.some(c => Object.hasOwn(c, 'ephemeralExpiration')) ? this.lidKeysByPhone() : undefined;
     for (const record of records) {
-      const r = this.withoutStaleTimer(record);
+      const r = this.withoutStaleTimer(record, lidIndex);
       if (!r.id) {
         continue;
       }
@@ -346,7 +349,7 @@ export class BaileysSessionStore {
       if (this.stillDeleted(r.id, timestamp)) {
         // Except its disappearing timer, which WhatsApp keeps across a deletion, as this store does: a timer
         // turned off while the chat is deleted comes with no message. A held update's timer is applied now.
-        this.applyChatTimer(r.id, r);
+        this.applyChatTimer(r.id, r, lidIndex);
         // The update of a message from the deletion's own second waits for that message's record.
         const messageId = r.messages?.[0]?.message?.key?.id;
         const mark = messageId ? this.deletionMark(this.markKeys(r.id)) : undefined;
@@ -358,7 +361,7 @@ export class BaileysSessionStore {
       const existing = this.chats.get(r.id) ?? { id: r.id };
       this.chats.set(r.id, { ...existing, ...r });
       this.persistChatState(r.id, r);
-      this.applyChatTimer(r.id, r);
+      this.applyChatTimer(r.id, r, lidIndex);
     }
   }
 
@@ -370,11 +373,11 @@ export class BaileysSessionStore {
    * and a twin chat record would otherwise serve the old timer from the getEphemeralExpiration fallback.
    * Only the cache and twin records that exist are written: no record is created and nothing persisted.
    */
-  private applyChatTimer(chatId: string, r: Partial<Chat>): void {
+  private applyChatTimer(chatId: string, r: Partial<Chat>, lidIndex?: Map<string, string[]>): void {
     if (!Object.hasOwn(r, 'ephemeralExpiration')) return;
     const exp = r.ephemeralExpiration;
     const setAt = this.toUnixSeconds(r.ephemeralSettingTimestamp);
-    for (const key of this.timerKeys(chatId)) {
+    for (const key of this.timerKeys(chatId, lidIndex)) {
       if (typeof exp === 'number' && exp > 0) {
         this.ephemeralByChat.set(key, exp);
       } else {
@@ -391,10 +394,10 @@ export class BaileysSessionStore {
    * maps to more than one lid (a recycled number) belongs to no one chat, and through it one holder's timer would
    * be read, compared and written as the other's, so then only the chat's own spellings are used.
    */
-  private timerKeys(chatId: string): Set<string> {
-    const twins = this.chatTwins(chatId);
+  private timerKeys(chatId: string, lidIndex?: Map<string, string[]>): Set<string> {
+    const twins = this.chatTwins(chatId, lidIndex);
     const own = parseWaId(chatId);
-    const keys = this.phoneOfManyLids(twins)
+    const keys = this.phoneOfManyLids(twins, lidIndex)
       ? twins.filter(k => {
           const id = parseWaId(k);
           return id.kind === own.kind && id.userPart === own.userPart;
@@ -404,11 +407,11 @@ export class BaileysSessionStore {
   }
 
   /** Whether the cache maps the phone among a chat's twins (its own number, or its lid's) to more than one lid. */
-  private phoneOfManyLids(twins: string[]): boolean {
+  private phoneOfManyLids(twins: string[], lidIndex?: Map<string, string[]>): boolean {
     const phone = twins.find(k => parseWaId(k).kind === 'user');
     if (!phone) return false;
     const lids = new Set(
-      this.chatTwins(phone)
+      this.chatTwins(phone, lidIndex)
         .map(k => parseWaId(k))
         .flatMap(id => (id.kind === 'lid' ? [id.userPart] : [])),
     );
@@ -420,10 +423,10 @@ export class BaileysSessionStore {
    * record snapshotted before the timer changed can arrive after the change, also once the chat is deleted. An
    * update that names no setting time is taken as before. A copy, so the library's event payload is untouched.
    */
-  private withoutStaleTimer(r: Partial<Chat>): Partial<Chat> {
+  private withoutStaleTimer(r: Partial<Chat>, lidIndex?: Map<string, string[]>): Partial<Chat> {
     const setAt = this.toUnixSeconds(r.ephemeralSettingTimestamp);
     if (!r.id || !setAt || !Object.hasOwn(r, 'ephemeralExpiration')) return r;
-    if (![...this.timerKeys(r.id)].some(k => (this.timerSetAt.get(k) ?? 0) > setAt)) return r;
+    if (![...this.timerKeys(r.id, lidIndex)].some(k => (this.timerSetAt.get(k) ?? 0) > setAt)) return r;
     const kept = { ...r };
     delete kept.ephemeralExpiration;
     delete kept.ephemeralSettingTimestamp;
@@ -751,8 +754,11 @@ export class BaileysSessionStore {
     return null;
   }
 
-  /** Every spelling of one chat this session can connect: the id, its engine form, and its lid or phone twin. */
-  chatTwins(jid: string): string[] {
+  /**
+   * Every spelling of one chat this session can connect: the id, its engine form, and its lid or phone twin.
+   * `lidIndex` ({@link lidKeysByPhone}) answers a phone's mapped lids in place of a walk of every mapping.
+   */
+  chatTwins(jid: string, lidIndex?: Map<string, string[]>): string[] {
     const parsed = parseWaId(jid);
     const twins = [jid, this.toEngineJid(jid)];
     if (parsed.kind === 'lid') {
@@ -760,8 +766,12 @@ export class BaileysSessionStore {
       const phone = this.resolvePhone(jid);
       if (phone) twins.push(`${phone}@s.whatsapp.net`);
     } else if (parsed.kind === 'user') {
-      for (const [lid, pn] of this.lidToPn.entries()) {
-        if (userPart(pn) === parsed.userPart) twins.push(lid);
+      if (lidIndex) {
+        twins.push(...(lidIndex.get(parsed.userPart) ?? []));
+      } else {
+        for (const [lid, pn] of this.lidToPn.entries()) {
+          if (userPart(pn) === parsed.userPart) twins.push(lid);
+        }
       }
       for (const lid of this.lidStore?.lidsForPhone(parsed.userPart) ?? []) twins.push(`${lid}@lid`);
     }
@@ -1259,6 +1269,17 @@ export class BaileysSessionStore {
       if (raw.kind === 'lid') twins.add(`${raw.userPart}@lid`);
     }
     return [...twins];
+  }
+
+  /** Phone digits to the lid keys this session maps to them as {@link chatTwins} finds them, raw, in one walk. */
+  private lidKeysByPhone(): Map<string, string[]> {
+    const index = new Map<string, string[]>();
+    for (const [lid, pn] of this.lidToPn.entries()) {
+      const lids = index.get(userPart(pn));
+      if (lids) lids.push(lid);
+      else index.set(userPart(pn), [lid]);
+    }
+    return index;
   }
 
   /** Phone digits to the lid JIDs this session maps to them, built once per listing. */
