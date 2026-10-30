@@ -132,7 +132,7 @@ STORAGE_LOCAL_PATH=./data/media
 
 # Docker Profiles: none (minimal setup)
 `;
-    writeSecretFile(generatedEnvPath, minimalConfig);
+    writeSecretFile(generatedEnvPath, minimalConfig, message => lines.push({ level: 'warn', message }));
     lines.push({ level: 'log', message: `Created default configuration at: ${generatedEnvPath}` });
     dotenv.config({ path: generatedEnvPath, override: false, quiet: true });
   }
