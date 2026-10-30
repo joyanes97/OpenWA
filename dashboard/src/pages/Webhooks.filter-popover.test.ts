@@ -94,4 +94,6 @@ test('an Escape that ends an IME composition leaves the filter popover open', as
   rtl.fireEvent.mouseEnter(badge);
   rtl.fireEvent.keyDown(document.body, { key: 'Escape', isComposing: true });
   assert.ok(popoverShown(), 'the composition Escape closed the popover');
+  rtl.fireEvent.keyDown(document.body, { key: 'Escape', keyCode: 229 });
+  assert.ok(popoverShown(), 'an Escape the input method processed closed the popover');
 });

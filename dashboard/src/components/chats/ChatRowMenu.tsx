@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { ChevronDown } from 'lucide-react';
 import type { Chat } from '../../services/api';
 import { chatTitle } from '../../utils/formatPhone';
+import { isComposingKey } from '../../utils/composition';
 import { chatActionItems, type ChatActionItem, type ChatRowActions } from './chatActionItems';
 
 /**
@@ -130,7 +131,7 @@ function ChatRowMenu({
       if (!rootRef.current?.contains(event.target as Node)) onOpenChange(false);
     };
     const onEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented) return;
+      if (event.key !== 'Escape' || isComposingKey(event) || event.defaultPrevented) return;
       event.preventDefault();
       onOpenChange(false);
       triggerRef.current?.focus();

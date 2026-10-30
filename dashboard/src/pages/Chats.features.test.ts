@@ -3010,6 +3010,17 @@ test("a row's menu closes on a press outside it and stays open for a press insid
   assert.ok(!container.querySelector('.chat-row-menu-popover'), 'a press outside left the menu open');
 });
 
+test("a row's menu leaves an Escape the input method processed alone and closes on a plain Escape", async () => {
+  const { screen, fireEvent } = rtl;
+  const { container } = renderPage();
+  await screen.findByText('Alice');
+  fireEvent.click(screen.getByRole('button', { name: 'Actions for Alice' }));
+  fireEvent.keyDown(document, { key: 'Escape', keyCode: 229 });
+  assert.ok(container.querySelector('.chat-row-menu-popover'), 'an Escape the input method processed closed the menu');
+  fireEvent.keyDown(document, { key: 'Escape' });
+  assert.ok(!container.querySelector('.chat-row-menu-popover'), 'Escape left the menu open');
+});
+
 test("the room's menu closes on a press outside it and on Escape, and Escape leaves the room open", async () => {
   const { screen, fireEvent, waitFor } = rtl;
   const { container } = renderPage();
@@ -3026,6 +3037,8 @@ test("the room's menu closes on a press outside it and on Escape, and Escape lea
 
   fireEvent.click(trigger);
   assert.ok(menuOpen());
+  fireEvent.keyDown(document, { key: 'Escape', keyCode: 229 });
+  assert.ok(menuOpen(), 'an Escape the input method processed closed the menu');
   fireEvent.keyDown(document, { key: 'Escape' });
   assert.ok(!menuOpen(), 'Escape left the menu open');
   assert.ok(container.querySelector('.room-header'), 'Escape closed the room along with the menu');

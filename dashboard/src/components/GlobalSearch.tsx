@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { searchApi, type SearchHit } from '../services/api';
 import { renderHighlightedSnippet, buildSearchParams } from '../utils/search-highlight';
+import { isComposingKey } from '../utils/composition';
 import { useTranslation } from 'react-i18next';
 import './GlobalSearch.css';
 
@@ -151,7 +152,7 @@ export function GlobalSearch({ onHit, currentSessionId }: GlobalSearchProps) {
       // "more") and is consumed, so a page-level Escape handler (the Chats page closes the open
       // conversation) leaves it alone.
       onKeyDown={e => {
-        if (e.key !== 'Escape' || e.nativeEvent.isComposing) return;
+        if (e.key !== 'Escape' || isComposingKey(e.nativeEvent)) return;
         // A pending debounce would reopen the results the user just dismissed. Cancelling it is the
         // key's whole effect, so it is consumed too, even before any results have opened.
         const cancelledSearch = timer.current !== null;

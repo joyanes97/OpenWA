@@ -727,6 +727,10 @@ test('Escape dismisses the emoji picker instead of the conversation behind it', 
   fireEvent.click(screen.getByTitle('Pick emoji'));
   await waitFor(() => assert.ok(container.querySelector('.chats-emoji-picker'), 'the emoji picker did not open'));
 
+  fireEvent.keyDown(document, { key: 'Escape', keyCode: 229 });
+  assert.ok(container.querySelector('.chats-emoji-picker'), 'an Escape the input method processed closed the picker');
+  assert.ok(screen.queryByRole('button', { name: 'Back' }), 'an Escape the input method processed closed the room');
+
   // Driven from document, which is where a real Escape lands: focus is on the toggle button, not
   // inside the picker, so a handler bound to the picker element would never see this event. One
   // press must do both things, dismiss the picker and leave the conversation open.
@@ -796,6 +800,8 @@ test('Escape closes the open room, and is left alone while a dialog owns it', as
   assert.ok(screen.queryByRole('button', { name: 'Back' }), 'Escape closed the room while a dialog was open');
 
   dialog.remove();
+  fireEvent.keyDown(document, { key: 'Escape', keyCode: 229 });
+  assert.ok(screen.queryByRole('button', { name: 'Back' }), 'an Escape the input method processed closed the room');
   fireEvent.keyDown(document, { key: 'Escape' });
   await waitFor(() =>
     assert.equal(screen.queryByRole('button', { name: 'Back' }) === null, true, 'Escape did not close the room'),

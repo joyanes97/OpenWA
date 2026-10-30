@@ -77,6 +77,7 @@ import { createTrailingCoalescer } from '../utils/trailingCoalescer';
 import { createReloadCoalescer, type ReloadCoalescer } from '../utils/reloadCoalescer';
 import { copyToClipboard } from '../utils/clipboard';
 import { statusFontStyle } from '../utils/statusFonts';
+import { isComposingKey } from '../utils/composition';
 import MessageBody from '../components/chats/MessageBody';
 import MediaLightbox, { type LightboxItem } from '../components/chats/MediaLightbox';
 import ChatAvatar from '../components/chats/ChatAvatar';
@@ -1861,7 +1862,7 @@ export function Chats() {
       if (!roomMenuRef.current?.contains(event.target as Node)) setRoomMenuOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented) return;
+      if (event.key !== 'Escape' || isComposingKey(event) || event.defaultPrevented) return;
       event.preventDefault();
       closeRoomMenu();
     };
@@ -1903,7 +1904,7 @@ export function Chats() {
   // still being committed by an IME, is left alone for the same reason.
   useEffect(() => {
     const closeOpenViewOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+      if (event.key !== 'Escape' || event.defaultPrevented || isComposingKey(event)) return;
       if (document.querySelector('[role="dialog"], [role="menu"]')) return;
       if (activeStatusContactId !== null) setActiveStatusContactId(null);
       else if (activeChannel) setActiveChannel(null);

@@ -316,6 +316,8 @@ test('clicking the input after a pick or Escape shows the results again', async 
   fireEvent.click(input);
   assert.ok(await screen.findByRole('listbox'), 'clicking the input after a pick did not reopen the results');
 
+  fireEvent.keyDown(input, { key: 'Escape', keyCode: 229 });
+  assert.ok(screen.queryByRole('listbox'), 'an Escape the input method processed closed the results');
   fireEvent.keyDown(input, { key: 'Escape' });
   assert.ok(!screen.queryByRole('listbox'), 'Escape left the results open');
   fireEvent.click(input);

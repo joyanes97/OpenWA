@@ -108,6 +108,8 @@ test('the tab stop starts at the selected session again each time the list opens
   open();
   rtl.fireEvent.keyDown(rtl.screen.getByLabelText('Search sessions...'), { key: 'ArrowDown' });
   assert.deepEqual(tabStops(), ['Ben']);
+  rtl.fireEvent.keyDown(document, { key: 'Escape', keyCode: 229 });
+  assert.ok(rtl.screen.queryByRole('listbox'), 'an Escape the input method processed closed the list');
   rtl.fireEvent.keyDown(document, { key: 'Escape' });
   assert.equal(document.activeElement?.getAttribute('title'), 'Switch session', 'Escape did not return focus');
   open();

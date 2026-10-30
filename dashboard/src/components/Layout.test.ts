@@ -306,6 +306,8 @@ test('the phone drawer leaves Escape to a dialog above it and to a composition',
 
     rtl.fireEvent.keyDown(document.body, { key: 'Escape', isComposing: true });
     assert.ok(sidebar.classList.contains('open'), 'the Escape of a composition closed the drawer');
+    rtl.fireEvent.keyDown(document.body, { key: 'Escape', keyCode: 229 });
+    assert.ok(sidebar.classList.contains('open'), 'an Escape the input method processed closed the drawer');
 
     document.body.appendChild(dialog);
     assert.equal(rtl.fireEvent.keyDown(document.body, { key: 'Escape' }), true, 'the drawer took the Escape');

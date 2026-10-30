@@ -43,6 +43,14 @@ test('an Escape that cancels an IME composition in a dialog field keeps the dial
   assert.equal(closes, 0, 'the Escape of a composition closed the dialog');
 });
 
+// keyCode 229 marks a key the input method processed, also on a keydown without isComposing.
+test('an Escape the input method processed keeps the dialog open', () => {
+  let closes = 0;
+  const input = renderDialog(() => closes++);
+  rtl.fireEvent.keyDown(input, { key: 'Escape', keyCode: 229 });
+  assert.equal(closes, 0, 'the Escape of the input method closed the dialog');
+});
+
 test('a plain Escape in a dialog field still closes the dialog', () => {
   let closes = 0;
   const input = renderDialog(() => closes++);
