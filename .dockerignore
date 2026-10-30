@@ -1,12 +1,10 @@
 # Dependencies — reinstalled inside the image via npm ci
 node_modules/
 dashboard/node_modules/
-# Docker anchors a bare name at the context root, so a tree below it needs its own rule. The SDKs'
-# dependency and build trees are not inputs of this image at all.
+# Docker anchors a bare name at the context root, so a tree below it needs its own rule. No build
+# step reads the SDKs, so their sources, dependencies, build output and test caches all stay out.
 **/node_modules/
-sdk/php/vendor/
-sdk/python/.venv/
-sdk/java/target/
+sdk/
 
 # Build output — rebuilt inside the image; local output/caches must not leak
 # into the builder's `COPY . .` (a stale tsbuildinfo can poison the build)

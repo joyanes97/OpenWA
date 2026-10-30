@@ -326,10 +326,8 @@ test('a Dockerfile with no COPY source fails instead of passing for lack of inpu
 // Each path is a tree a checkout grows below the root (an SDK's install or build, a coverage run, a compiler
 // cache), or the media directory an install from 0.2.0 to 0.7.3 may still write.
 const BELOW_ROOT = {
-  '**/node_modules/': 'sdk/javascript/node_modules/typescript/package.json',
-  'sdk/php/vendor/': 'sdk/php/vendor/autoload.php',
-  'sdk/python/.venv/': 'sdk/python/.venv/pyvenv.cfg',
-  'sdk/java/target/': 'sdk/java/target/openwa.jar',
+  '**/node_modules/': 'scripts/node_modules/zx/package.json',
+  'sdk/': 'sdk/javascript/dist/cjs/index.js',
   '**/*.tsbuildinfo': 'dashboard/tsconfig.app.tsbuildinfo',
   '**/coverage/': 'dashboard/coverage/lcov.info',
   'uploads/': 'uploads/s1/2026/10/photo.jpg',
