@@ -775,6 +775,7 @@ export class BaileysSessionStore {
    * single non-ephemeral message must not clear a known timer; WhatsApp keeps stamping it while on).
    * A message no newer than the chat's last timer change (`ephemeralSettingTimestamp`, on any twin) is
    * skipped: it carries the old timer, and a reconnect flush or history sync records it after the change.
+   * A deleted chat has no record to carry that time, so the change time {@link applyChatTimer} kept counts too.
    */
   private recordEphemeralFromMessage(chatId: string, msg: WAMessage): void {
     const duration = this.extractEphemeralDuration(msg);
@@ -782,9 +783,11 @@ export class BaileysSessionStore {
       return;
     }
     const setAt = Math.max(
-      ...[this.chatKey(chatId), ...this.chatTwins(chatId)].map(k =>
+      ...[this.chatKey(chatId), ...this.chatTwins(chatId)].flatMap(k => [
         this.toUnixSeconds(this.chats.get(k)?.ephemeralSettingTimestamp),
-      ),
+        this.timerSetAt.get(k) ?? 0,
+        this.timerSetAt.get(this.toNeutralJid(k)) ?? 0,
+      ]),
     );
     if (setAt > 0 && this.toUnixSeconds(msg.messageTimestamp) <= setAt) {
       return;
