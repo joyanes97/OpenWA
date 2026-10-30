@@ -2,7 +2,7 @@ import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
-import { Readable, PassThrough, finished } from 'stream';
+import { Readable, PassThrough, Transform, finished, pipeline } from 'stream';
 import {
   S3Client,
   S3ClientConfig,
@@ -59,7 +59,8 @@ export const S3_PROBE_TIMEOUT_MS = 10_000;
  * connection and never answers (a paused container, a stuck proxy) leaves the request pending
  * forever, holding its media buffer and the caller. The socket bound is an idle timeout, so a long
  * upload or download that keeps moving bytes is not cut off. A bare requestTimeout would not do:
- * the HTTP handler only logs a warning when it expires.
+ * the HTTP handler only logs a warning when it expires. The HTTP handler stops applying the socket
+ * bound once the response headers arrive, so an object body gets the same idle bound in openS3File.
  */
 export const S3_CONNECT_TIMEOUT_MS = 5_000;
 export const S3_SOCKET_TIMEOUT_MS = 30_000;
@@ -70,6 +71,35 @@ export const S3_SOCKET_TIMEOUT_MS = 30_000;
  */
 export const S3_MAX_OPEN_DOWNLOADS = 50;
 
+/**
+ * Pass an object body on, failing it with a TimeoutError once no chunk has come through for idleMs: a store
+ * that stopped sending, or a reader that stopped reading and so stopped the socket. The timer is cleared once
+ * the whole body has come through, so it only fires while the pipeline still listens for the guard's error.
+ */
+function withIdleBound(body: Readable, idleMs: number): Readable {
+  const timer = setTimeout(() => {
+    guard.destroy(Object.assign(new Error(`S3 object body sent nothing for ${idleMs} ms`), { name: 'TimeoutError' }));
+  }, idleMs);
+  timer.unref();
+  const guard = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      timer.refresh();
+      callback(null, chunk);
+    },
+    flush(callback) {
+      clearTimeout(timer);
+      callback();
+    },
+    destroy(error, callback) {
+      clearTimeout(timer);
+      callback(error);
+    },
+  });
+  // pipeline, not pipe: destroying the guard (a client that went away, or the timer) must destroy the body too.
+  pipeline(body, guard, () => undefined);
+  return guard;
+}
+
 @Injectable()
 export class StorageService implements OnModuleDestroy {
   private readonly logger = createLogger('StorageService');
@@ -78,8 +108,9 @@ export class StorageService implements OnModuleDestroy {
   private s3Client: S3Client | null = null;
   /**
    * Serves openFile. A stream holds its pooled socket until its reader has taken the whole object, so a slow
-   * HTTP client holds it for its whole download, and a stalled one until the idle timeout. On a pool of their
-   * own, a burst of downloads cannot leave the writes, deletes and listings on s3Client waiting for a socket.
+   * HTTP client holds it for its whole download, and a stalled one until the body has been idle for
+   * S3_SOCKET_TIMEOUT_MS. On a pool of their own, a burst of downloads cannot leave the writes, deletes and
+   * listings on s3Client waiting for a socket.
    */
   private s3StreamClient: S3Client | null = null;
   private s3OpenDownloads = 0;
@@ -614,11 +645,12 @@ export class StorageService implements OnModuleDestroy {
       release();
       throw new Error('Empty response body');
     }
-    const stream = response.Body as Readable;
-    // Its socket goes back once the body is read to the end, fails, or is destroyed (a client that went away, or
-    // the idle timeout).
-    finished(stream, release);
-    return { stream, size: response.ContentLength };
+    const body = response.Body as Readable;
+    // Released on the SDK body, which holds the socket: it goes back once the body is read to the end, fails, or
+    // is destroyed (a client that went away, or the idle bound). Released on the guard instead, a reader that
+    // stopped with the last chunks in the guard's buffer would hold the place after the socket went back.
+    finished(body, release);
+    return { stream: withIdleBound(body, S3_SOCKET_TIMEOUT_MS), size: response.ContentLength };
   }
 
   private async putS3File(filePath: string, data: Buffer): Promise<void> {

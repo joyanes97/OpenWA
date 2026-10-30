@@ -294,7 +294,7 @@ describe('StorageService S3 re-probe and recovery', () => {
     expect(data.toString()).toBe('from-s3');
   });
 
-  it('openFile hands the S3 body through unread, with the object length as its size', async () => {
+  it('openFile streams the S3 body, with the object length as its size', async () => {
     const body = Readable.from([Buffer.from('from-s3')]);
     mockSend.mockImplementation((cmd: unknown) => {
       if (cmd instanceof GetObjectCommand) return Promise.resolve({ Body: body, ContentLength: 7 });
@@ -303,7 +303,11 @@ describe('StorageService S3 re-probe and recovery', () => {
     const svc = new StorageService(makeConfig());
     await flush();
 
-    await expect(svc.openFile('present.bin')).resolves.toEqual({ stream: body, size: 7 });
+    const { stream, size } = await svc.openFile('present.bin');
+    expect(size).toBe(7);
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(chunk as Buffer);
+    expect(Buffer.concat(chunks).toString()).toBe('from-s3');
   });
 
   it('openFile reads a missing S3 object through from the local fallback dir, and rejects when neither has it', async () => {
