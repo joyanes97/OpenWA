@@ -54,6 +54,7 @@ import { Modal } from '../components/Modal';
 import './Sessions.css';
 import { formatLastActive, formatSessionStatus } from '../utils/sessionDisplay';
 import { normalizePhoneText } from '../utils/phone';
+import { isComposingKey } from '../utils/composition';
 
 /**
  * The hover title for a restriction: the engine's own cause token, plus when enforcement ends if
@@ -793,7 +794,7 @@ export function Sessions() {
               const value = e.target.value.toLowerCase().replace(/\s+/g, '-');
               setNewSessionName(value);
             }}
-            onKeyDown={e => e.key === 'Enter' && !createDisabled && handleCreate()}
+            onKeyDown={e => e.key === 'Enter' && !isComposingKey(e.nativeEvent) && !createDisabled && handleCreate()}
           />
           <p className="input-hint">
             <Trans i18nKey="sessions.create.hint" components={{ code: <code /> }} />
@@ -932,7 +933,12 @@ export function Sessions() {
                         )
                       }
                       onCompositionEnd={e => setPhoneNumber(readPairingPhone(e.currentTarget.value))}
-                      onKeyDown={e => e.key === 'Enter' && !pairingPhoneInvalid && handleGeneratePairingCode()}
+                      onKeyDown={e =>
+                        e.key === 'Enter' &&
+                        !isComposingKey(e.nativeEvent) &&
+                        !pairingPhoneInvalid &&
+                        handleGeneratePairingCode()
+                      }
                     />
                     {pairingPhoneInvalid && (
                       <p id="pairing-phone-error" className="input-error" role="alert">

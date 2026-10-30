@@ -28,6 +28,7 @@ import { batchStopMessage, useNumberCheck, type CheckResultItem } from '../hooks
 import { escapeCsvCell } from '../utils/csv';
 import { normalizePhoneText } from '../utils/phone';
 import { keepsSameKey } from '../utils/authLifecycle';
+import { isComposingKey } from '../utils/composition';
 import './NumberChecker.css';
 
 // Every lookup is an outbound WhatsApp query that counts against the gateway's per-IP limit on this route
@@ -391,7 +392,7 @@ export function NumberChecker() {
                     value={phoneNumber}
                     onChange={e => setPhoneNumber(e.target.value)}
                     onKeyDown={e => {
-                      if (e.key === 'Enter') handleSingleCheck();
+                      if (e.key === 'Enter' && !isComposingKey(e.nativeEvent)) handleSingleCheck();
                     }}
                     disabled={isCheckingSingle}
                   />
