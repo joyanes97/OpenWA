@@ -179,8 +179,8 @@ describe('a keyed whatsapp-web.js send refused with the not-ready 409', () => {
     expect(await keyState()).toBe('absent');
 
     client.pupPage.evaluate.mockResolvedValue(true);
+    // The re-injected page's ready closes the reload window synchronously.
     client.emit('ready');
-    await new Promise(resolve => setImmediate(resolve));
     await expect(withKey()).resolves.toMatchObject({ messageId: 'true_x@g.us_M1' });
     expect(client.sendMessage).toHaveBeenCalledTimes(1);
   });
