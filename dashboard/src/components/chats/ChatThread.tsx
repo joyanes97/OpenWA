@@ -35,6 +35,7 @@ import {
 } from '../../utils/chatMessages';
 import { shouldFetchOlderMessages } from '../../utils/scrollDecision';
 import { keepsSameKey } from '../../utils/authLifecycle';
+import { retryThrottled } from '../../utils/fetchAllPages';
 import ArchivedMediaPreview, { type ArchivedMediaKind } from './ArchivedMediaPreview';
 import MessageBody from './MessageBody';
 
@@ -278,7 +279,12 @@ function ChatThread({
       let objectUrl: string | null = null;
       const sameKey = keepsSameKey();
       try {
-        const blob = await sessionApi.getMessageMediaBlob(sessionId, activeChat.id, messageId);
+        // A 429 and the 503 of a full S3 download pool are refusals to try again, as the archived previews do.
+        const blob = await retryThrottled(
+          () => sessionApi.getMessageMediaBlob(sessionId, activeChat.id, messageId),
+          1000,
+          [429, 503],
+        );
         if (!sameKey()) return;
         objectUrl = URL.createObjectURL(blob);
         const link = document.createElement('a');

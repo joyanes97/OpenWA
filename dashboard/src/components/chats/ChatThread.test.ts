@@ -1995,3 +1995,116 @@ test('the first bubble of a run from one side starts a run, and a new day starts
   );
   assert.deepEqual(runStarts, [true, false, false], 'one side on one day is a single run');
 });
+
+const OMITTED_DOCUMENT: ChatMessageView = {
+  ...PROMPT,
+  id: 'big',
+  waMessageId: 'wamid.big',
+  body: '',
+  type: 'document',
+  metadata: { media: { mimetype: 'application/pdf', filename: 'report.pdf', omitted: true, sizeBytes: 10 } },
+};
+
+/** The answer of the S3 gateway while its download pool is full. */
+const poolFull = (): Response =>
+  new Response(JSON.stringify({ statusCode: 503, message: 'Too many media downloads are in progress' }), {
+    status: 503,
+    headers: { 'Content-Type': 'application/json', 'Retry-After': '1' },
+  });
+
+/**
+ * Click the download button of OMITTED_DOCUMENT with its media route answered by `answer` (given the request's
+ * number, from 1), and run `check` while the stubs hold. A saved file is recorded by name instead of downloaded.
+ */
+async function clickDownload(
+  answer: (call: number) => Response,
+  check: (state: { container: HTMLElement; saved: string[]; calls: () => number }) => Promise<void>,
+): Promise<void> {
+  window.sessionStorage.setItem('openwa_api_key', 'key-a');
+  const fetchOriginal = globalThis.fetch;
+  const createOriginal = URL.createObjectURL;
+  const revokeOriginal = URL.revokeObjectURL;
+  const createElementOriginal = document.createElement;
+  const saved: string[] = [];
+  let calls = 0;
+  globalThis.fetch = (() => Promise.resolve(answer(++calls))) as typeof fetch;
+  URL.createObjectURL = () => 'blob:report';
+  URL.revokeObjectURL = () => {};
+  document.createElement = ((tag: string, options?: ElementCreationOptions) => {
+    const element = createElementOriginal.call(document, tag, options);
+    if (tag === 'a')
+      (element as HTMLAnchorElement).click = () => void saved.push((element as HTMLAnchorElement).download);
+    return element;
+  }) as typeof document.createElement;
+  try {
+    const { container } = renderThread('operator', [OMITTED_DOCUMENT]);
+    const button = container.querySelector('[data-wa-message-id="wamid.big"] button.message-media-omitted');
+    assert.ok(button, 'the over-budget document did not render its download button');
+    rtl.fireEvent.click(button);
+    await check({ container, saved, calls: () => calls });
+  } finally {
+    globalThis.fetch = fetchOriginal;
+    URL.createObjectURL = createOriginal;
+    URL.revokeObjectURL = revokeOriginal;
+    document.createElement = createElementOriginal;
+    window.sessionStorage.removeItem('openwa_api_key');
+  }
+}
+
+const saysUnavailable = (container: HTMLElement): boolean =>
+  container.querySelector('[data-wa-message-id="wamid.big"]')?.textContent?.includes('Media unavailable') ?? false;
+
+// On S3 the gateway refuses a media download at once while its download pool is full (503 with Retry-After), and a
+// place frees as soon as one download ends. The bytes are there: the download is tried again after the wait, and the
+// bubble never says they are unavailable.
+test('a media download refused while the download pool is full is tried again and saves the file', async () => {
+  await clickDownload(
+    call => (call === 1 ? poolFull() : new Response(new Blob(['x']), { status: 200 })),
+    async ({ container, saved, calls }) => {
+      await rtl.waitFor(() => assert.deepEqual(saved, ['report.pdf'], 'the refused download was not tried again'), {
+        timeout: 10_000,
+      });
+      assert.equal(calls(), 2);
+      assert.equal(
+        saysUnavailable(container),
+        false,
+        'the bubble says the media is unavailable after a refusal for a full download pool',
+      );
+    },
+  );
+});
+
+test('a media download answered 404 says the media is unavailable without asking again', async () => {
+  await clickDownload(
+    () =>
+      new Response(JSON.stringify({ statusCode: 404, message: 'Media not found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    async ({ container, saved, calls }) => {
+      await rtl.waitFor(() => assert.ok(saysUnavailable(container), 'the bubble did not say the media is unavailable'));
+      assert.equal(calls(), 1, 'a missing file was asked for again');
+      assert.deepEqual(saved, []);
+    },
+  );
+});
+
+test('a media download whose retry is answered after sign-out saves no file', async () => {
+  const retried = new Response(new Blob(['x']), { status: 200 });
+  const readBlob = retried.blob.bind(retried);
+  let read: Promise<Blob> | undefined;
+  retried.blob = () => (read = readBlob());
+  await clickDownload(
+    call => (call === 1 ? poolFull() : retried),
+    async ({ saved, calls }) => {
+      await rtl.waitFor(() => assert.equal(calls(), 1));
+      window.sessionStorage.removeItem('openwa_api_key');
+      await rtl.waitFor(() => assert.ok(read, 'the refused download was not tried again'), { timeout: 10_000 });
+      await read;
+      // The rest of the download after the body is read is promise jobs, all run before this timer.
+      await new Promise(resolve => setTimeout(resolve, 0));
+      assert.equal(calls(), 2);
+      assert.deepEqual(saved, [], 'the media file was saved after the sign-out');
+    },
+  );
+});
