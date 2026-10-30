@@ -4,6 +4,9 @@ import { DataSource } from 'typeorm';
 import { assertDataConnectionUtc, parseTimestampAsUtc, postgresUtcExtra, utcTimestampTypes } from './postgres-utc';
 import { buildPostgresDataSourceOptions } from './data-source';
 
+// Keep the checkout's own .env and data/.env.generated out: the CLI data sources load them on import.
+jest.mock('./load-cli-env', () => ({ loadCliEnv: jest.fn() }));
+
 // pg serialises a bound parameter through this module-level helper; there is no per-client seam, so
 // this is where the input half of the pin is observable without a server.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
