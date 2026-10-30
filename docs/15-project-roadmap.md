@@ -660,6 +660,13 @@ PR, and pushing the tag from `main` hands everything else to `.github/workflows/
 - The amd64 image's Chrome for Testing pin (`chrome@<version>` in the `Dockerfile`) is the current
   Stable in `last-known-good-versions.json`. Nothing else refreshes it and no image scan sees it, so
   bump it on `main` first, as the comment above that install describes.
+- Name the version wherever the text was written before it was known, in a docs commit on `main` ahead of
+  the release commit: every `next` in the Release column of the Known Upgrade Hazards table in
+  `docs/14-migration-guide.md`, one for each hazard the release added, and every clause that says
+  "after OpenWA <last>", "the release after <last>" or "newer than <last>", such as line 3 of
+  `sdk/README.md`, `docs/18-sdk-design.md` and the SDK READMEs, which becomes "<version> or later".
+  `npm run test:docs` fails on a `next` row once `[Unreleased]` is empty, so a release commit that
+  skips this fails its own CI.
 
 ### The release commit
 
