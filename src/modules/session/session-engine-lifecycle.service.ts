@@ -1518,6 +1518,8 @@ export class SessionEngineLifecycle {
       }
       // Another attempt can finish tearing down this same engine first while sharing the episode.
       if (state.started !== attempt) return;
+      // An unlink the old engine reported during the teardown re-armed the state with the binding it cleared.
+      if (state.session && state.session.phone == null && session.phone) session = { ...session, phone: null };
 
       // Re-initialize. An engine failure reported inside this window is parked (see
       // parkReconnectInitFailure): a failed launch must retry, not land FAILED and strand the session.
