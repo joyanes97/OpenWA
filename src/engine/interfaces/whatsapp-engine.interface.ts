@@ -1537,9 +1537,10 @@ export interface LabelCapability {
   addLabelToChat(chatId: string, labelId: string): Promise<void>;
 
   /**
-   * Create or update a label, keyed on `label.id`. One operation, not two: the engines express both
+   * Create or update a label, keyed on `label.id`. One operation, not two: Baileys expresses both
    * through a single app-state write, and which one happens depends on whether the id already
-   * exists. Only fields that are set are changed.
+   * exists. The write replaces the whole label: a field left unset is not kept (a colour-only write
+   * clears the name). whatsapp-web.js cannot write labels and throws EngineNotSupportedError.
    */
   upsertLabel(label: LabelInput): Promise<void>;
 
