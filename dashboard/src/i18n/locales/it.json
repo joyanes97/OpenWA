@@ -1224,8 +1224,8 @@
       "storagePath": "Percorso Archiviazione",
       "bucket": "Nome Bucket",
       "region": "Regione",
-      "accessKey": "Access Key",
-      "secretKey": "Secret Key",
+      "accessKey": "Chiave di Accesso",
+      "secretKey": "Chiave Segreta",
       "endpoint": "Endpoint Personalizzato (opzionale)",
       "endpointHint": "Per MinIO o altri servizi compatibili con S3",
       "s3Unreachable": "S3 (non raggiungibile)"
