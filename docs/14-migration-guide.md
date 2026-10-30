@@ -1449,9 +1449,9 @@ psql -h "$DATABASE_HOST" -U "$DATABASE_USERNAME" -d "$DATABASE_NAME" -c "SELECT 
 # Check migration status (add :main for the auth/audit connection)
 npm run migration:show
 
-# Re-apply the most recent migration (there is no per-migration re-run —
-# migration:run always applies the whole pending chain)
-npm run migration:revert && npm run migration:run
+# There is no per-migration re-run: migration:run applies the whole pending chain, and a failed
+# migration is not recorded (its run rolls back). migration:revert runs the down() of the newest
+# migration that succeeded, which can delete data: it belongs to a planned downgrade (14.6).
 ```
 
 ---
