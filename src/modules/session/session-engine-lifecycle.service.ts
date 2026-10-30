@@ -83,10 +83,11 @@ export interface ReconnectState extends ReconnectAttemptState {
   readyEndedAt?: number;
   /**
    * The retry of a disconnect whose session row could not be read: the timer (state.timer holds the same
-   * one) and how many have been armed, which is what its backoff counts. Ended by a read that answers
-   * and by READY.
+   * one), how many have been armed, which is what its backoff counts, and the reason it re-runs the
+   * disconnect with: the report's own, or a terminal unlink reported while it waited. Ended by a read
+   * that answers and by READY.
    */
-  readRetry?: { timer: NodeJS.Timeout; attempts: number };
+  readRetry?: { timer: NodeJS.Timeout; attempts: number; reason: string };
 }
 
 // Reconnect-backoff bounds. An OPERATOR-supplied session.config feeds this math, so the values
@@ -665,7 +666,7 @@ export class SessionEngineLifecycle {
    *
    * SCOPE, stated plainly so the guarantee is not read wider than it is. Fenced: the three status
    * writes in the event wiring, the exhausted-reconnect FAILED, the start-path FAILED in controls,
-   * and the terminal-unlink phone clear in handleEngineDisconnected (like FAILED, a wrongly nulled
+   * and the terminal-unlink phone clear in recordTerminalUnlink (like FAILED, a wrongly nulled
    * phone does not self-heal until the owner's next READY). NOT fenced: handleEngineReady's direct
    * row write and handleEngineDisconnected's DISCONNECTED — both statuses are in the boot reset's
    * activeStatuses AND in TAKEOVER_STATUSES, so a wrong one self-heals, unlike FAILED. The gate is
@@ -1143,35 +1144,10 @@ export class SessionEngineLifecycle {
     // test SESSION_RESTRICTED already passes next door — rare, not reconnect noise, no other durable
     // record — and it keeps the objection that keeps the rest unemitted intact, since a flapping
     // connection retries with TIMEOUT/NAVIGATION and never with one of these.
-    if (TERMINAL_UNLINK_REASONS.has(reason)) {
-      void this.auditService?.logWarn(AuditAction.SESSION_DISCONNECTED, {
-        sessionId: id,
-        metadata: { reason },
-        errorMessage: `WhatsApp unlinked this device (${reason}); the session must be re-paired with a fresh QR`,
-      });
-      // The unlink is terminal: reconnecting can only land on a QR, so the next boot must not
-      // resurrect the session (auto-start and the takeover sweep both key on a non-null phone),
-      // exactly what logout() already ensures for operator-driven unlinks. The reconnect scheduled
-      // below still runs and shows one QR now. onReady rewrites phone on the next successful link.
-      // Fenced on ownership, unlike the DISCONNECTED write below: a wrongly nulled phone does not
-      // self-heal until the owner's next READY, the same reason the exhausted-reconnect FAILED write
-      // is fenced. Fire-and-forget: no await may sit between the identity fences above and below.
-      if (this.ownsSession(id)) {
-        void this.sessionRepository.update(id, { phone: null }).catch((err: unknown) =>
-          this.logger.warn('Failed to clear phone after a terminal unlink', {
-            sessionId: id,
-            error: String(err),
-            action: 'unlink_phone_clear_failed',
-          }),
-        );
-        // The phone is the account binding the next engine's onReady checks, and the clear just ended
-        // it: the reconnect links whichever number scans its QR, as a start after a restart would.
-        session = { ...session, phone: null };
-        // A reconnect already armed keeps its own snapshot (scheduleReconnect below leaves it alone), so the
-        // clear reaches that one too. Only the phone: the rest is what the report that armed it read.
-        const armed = this.reconnectStates.get(id);
-        if (armed?.timer && armed.session) armed.session = { ...armed.session, phone: null };
-      }
+    if (TERMINAL_UNLINK_REASONS.has(reason) && this.recordTerminalUnlink(id, reason)) {
+      // The phone is the account binding the next engine's onReady checks, and the clear just ended
+      // it: the reconnect links whichever number scans its QR, as a start after a restart would.
+      session = { ...session, phone: null };
     }
 
     void this.webhookService.dispatch(id, 'session.disconnected', { sessionId: id, reason });
@@ -1211,21 +1187,64 @@ export class SessionEngineLifecycle {
    * it re-enters handleEngineDisconnected, whose fences end it once the engine is no longer the live one.
    * The wait doubles from the base reconnect delay up to the reconnect backoff cap until the read answers,
    * so a row that never reads does not log an error every few seconds for the life of the process.
+   * A report whose read fails while the episode's timer is armed is left to that timer, except an unlink.
    */
   private retryDisconnectAfterFailedRead(id: string, engine: IWhatsAppEngine, reason: string): void {
     const state = this.reconnectStates.get(id);
-    if (!state || state.timer || this.closed || this.shutdownService?.isShuttingDown()) return;
+    if (!state || this.closed || this.shutdownService?.isShuttingDown()) return;
     // The read failed across an await, so a reconnect may have replaced this engine meanwhile. A retry armed
     // for it would hold the episode's timer, and the live engine's own drop would then find the slot taken.
     if (!this.isLiveEngine(id, engine)) return;
+    if (state.timer) {
+      // An unlink must not be lost behind the drop reported before it. A pending read retry re-runs with the
+      // unlink's reason once the row reads; an armed reconnect needs no row for it, so it is recorded now.
+      if (!TERMINAL_UNLINK_REASONS.has(reason)) return;
+      if (state.readRetry?.timer === state.timer) state.readRetry.reason = reason;
+      else this.recordTerminalUnlink(id, reason);
+      return;
+    }
     const attempts = (state.readRetry?.attempts ?? 0) + 1;
     const delay = Math.min(state.baseDelay * 2 ** (attempts - 1), RECONNECT_BASE_DELAY_MAX_MS);
     const timer = setTimeout(() => {
       state.timer = null;
-      void this.handleEngineDisconnected(id, engine, reason);
+      void this.handleEngineDisconnected(id, engine, retry.reason);
     }, delay);
+    const retry = { timer, attempts, reason };
     state.timer = timer;
-    state.readRetry = { timer, attempts };
+    state.readRetry = retry;
+  }
+
+  /**
+   * Records a terminal unlink, none of which needs the session row: the audit row, and while this node owns the
+   * session the phone clear on the row and on the snapshot an armed reconnect re-initializes from. Returns
+   * whether the phone was cleared.
+   *
+   * The unlink is terminal: reconnecting can only land on a QR, so the next boot must not resurrect the
+   * session (auto-start and the takeover sweep both key on a non-null phone), exactly what logout() already
+   * ensures for operator-driven unlinks. The reconnect still runs and shows one QR now; onReady rewrites
+   * phone on the next successful link. Fenced on ownership, unlike the DISCONNECTED write: a wrongly nulled
+   * phone does not self-heal until the owner's next READY, the same reason the exhausted-reconnect FAILED
+   * write is fenced. Fire-and-forget: no await may sit between the callers' identity fences.
+   */
+  private recordTerminalUnlink(id: string, reason: string): boolean {
+    void this.auditService?.logWarn(AuditAction.SESSION_DISCONNECTED, {
+      sessionId: id,
+      metadata: { reason },
+      errorMessage: `WhatsApp unlinked this device (${reason}); the session must be re-paired with a fresh QR`,
+    });
+    if (!this.ownsSession(id)) return false;
+    void this.sessionRepository.update(id, { phone: null }).catch((err: unknown) =>
+      this.logger.warn('Failed to clear phone after a terminal unlink', {
+        sessionId: id,
+        error: String(err),
+        action: 'unlink_phone_clear_failed',
+      }),
+    );
+    // A reconnect already armed keeps its own snapshot (scheduleReconnect leaves it alone), so the clear
+    // reaches that one too. Only the phone: the rest is what the report that armed it read.
+    const armed = this.reconnectStates.get(id);
+    if (armed?.timer && armed.session) armed.session = { ...armed.session, phone: null };
+    return true;
   }
 
   /** Ends the read retry: its timer, when it is still the one armed, and the count its backoff keeps. */
