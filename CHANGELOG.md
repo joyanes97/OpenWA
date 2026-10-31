@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-10-31
+
 ### Added
 
 - Add a session switcher to the dashboard Chats page that lists every session with its state, picture, push name and number, and lets only a ready one be selected. Thanks @rjsebening.
