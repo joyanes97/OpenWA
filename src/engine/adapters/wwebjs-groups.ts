@@ -21,7 +21,7 @@ import { InvalidInviteCodeError } from '../../common/errors/invalid-invite-code.
 import { toMessageMedia } from './wwebjs-messaging';
 import { type WwebjsEngineHost, rethrowIfNavigation, withPage, reportPageDeath } from './wwebjs-host';
 import { isNavigationError, isProtocolTimeout } from './wwebjs-lifecycle';
-import { listChats } from './wwebjs-chats';
+import { isPageInvariant, listChats, readChats } from './wwebjs-chats';
 
 /**
  * Extracts the JID of the parent community a group is linked to, if any.
@@ -137,7 +137,15 @@ export class WwebjsGroups {
   async getGroupInfo(groupId: string): Promise<GroupInfo | null> {
     this.host.ensureReady();
     try {
-      const chat = await this.client().getChatById(groupId);
+      // A group whose refresh fails one of WhatsApp Web's own invariants is read from the metadata the
+      // page already holds, as the group list reads it (readChatModels): as last loaded, not refreshed,
+      // and without a last message, which this read does not use. Any other rejection falls to the catch.
+      const chat = await this.client()
+        .getChatById(groupId)
+        .catch(async (error: unknown) => {
+          if (!isPageInvariant(error)) throw error;
+          return (await readChats(this.host, 'getGroupInfo', [groupId]))[0];
+        });
       if (!chat.isGroup) {
         return null;
       }
