@@ -111,3 +111,22 @@ for (const [script, zero] of [
     assert.ok(await rtl.screen.findByText(/with the country code/));
   });
 }
+
+// The Enter that commits an input method composition (isComposing, or keyCode 229) is the input method's: the number
+// is looked up on the Enter pressed once it is typed, not on the digits composed so far.
+test('the Enter that commits an input method composition does not look the number up', async () => {
+  const { lookups } = renderPanel();
+  await rtl.screen.findByText('Anna');
+  const field = search();
+
+  rtl.fireEvent.compositionStart(field);
+  rtl.fireEvent.change(field, { target: { value: '+4917012345' } });
+  rtl.fireEvent.keyDown(field, { key: 'Enter', isComposing: true });
+  rtl.fireEvent.keyDown(field, { key: 'Enter', keyCode: 229 });
+  rtl.fireEvent.compositionEnd(field);
+
+  rtl.fireEvent.change(field, { target: { value: '+491701234567' } });
+  rtl.fireEvent.keyDown(field, { key: 'Enter' });
+  await rtl.waitFor(() => assert.ok(lookups.length > 0));
+  assert.deepEqual(lookups, ['491701234567']);
+});

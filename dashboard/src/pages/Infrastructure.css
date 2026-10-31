@@ -688,9 +688,23 @@
   line-height: 1.5;
 }
 
-/* Data backup / restore */
+/* Data backup / restore. Import data is a label around its file input, hidden from sight but focusable: display: none
+   would take the chooser out of the tab order. The label shows the keyboard focus. */
 .infrastructure-page .hidden-file-input {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.infrastructure-page label:has(> .hidden-file-input:focus-visible) {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 /* Restart / migration progress modal */

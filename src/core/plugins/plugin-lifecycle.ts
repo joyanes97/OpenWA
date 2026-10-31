@@ -28,6 +28,8 @@ export class PluginLifecycle {
   private readonly enabling = new Set<string>();
   /** In-flight disables by plugin id, so a concurrent disable joins the running teardown. */
   private readonly disabling = new Map<string, Promise<void>>();
+  /** The env-derived config each built-in was registered with, under the operator's stored keys. */
+  private readonly builtInBase = new Map<string, Record<string, unknown>>();
 
   constructor(
     // The LOADER's logger, deliberately — lifecycle lines carry the PluginLoaderService tag, and
@@ -226,15 +228,19 @@ export class PluginLifecycle {
     // a built-in's effective config carries its env-derived defaults, and storing those would freeze
     // them over later .env changes (see registerBuiltInPlugin). Persisted first: a write that must be stored
     // and cannot be throws here and leaves the running config as it was.
-    this.pluginStorage.setPluginConfig(
-      pluginId,
-      {
-        ...(this.pluginStorage.getPluginConfig(pluginId) ?? {}),
-        ...config,
-      },
-      opts,
-    );
-    plugin.config = { ...plugin.config, ...config };
+    // On a built-in a top-level null removes the stored key, so the key goes back to its env-derived value; a
+    // stored null would outrank .env on every boot. An extension plugin stores the null as sent.
+    const base = this.builtInBase.get(pluginId) ?? {};
+    const cleared = this.builtInBase.has(pluginId) ? Object.keys(config).filter(key => config[key] === null) : [];
+    const stored = { ...(this.pluginStorage.getPluginConfig(pluginId) ?? {}), ...config };
+    for (const key of cleared) delete stored[key];
+    this.pluginStorage.setPluginConfig(pluginId, stored, opts);
+    const next = { ...plugin.config, ...config };
+    for (const key of cleared) {
+      if (Object.hasOwn(base, key)) next[key] = base[key];
+      else delete next[key];
+    }
+    plugin.config = next;
 
     // Notify the running plugin of the config change (fire and forget). A sandboxed plugin's
     // onConfigChange lives in the worker (plugin.instance is null), so route it through the live worker
@@ -353,6 +359,8 @@ export class PluginLifecycle {
     // override too (PUT /api/plugins/:id/config), except the auth-dir bases, which EngineFactory
     // passes to every createEngine call from the env config.
     const effectiveConfig = { ...config, ...(this.pluginStorage.getPluginConfig(manifest.id) ?? {}) };
+    // Kept so a stored key the operator removes can fall back to it (updatePluginConfig).
+    this.builtInBase.set(manifest.id, { ...config });
 
     const pluginInstance: PluginInstance = {
       manifest,

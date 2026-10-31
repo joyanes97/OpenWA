@@ -238,6 +238,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       restoreAddressbookSnapshot: () => this.history.restoreAddressbookSnapshot(),
       getOnQRCode: () => this.callbacks.onQRCode,
       getOnReady: () => this.callbacks.onReady,
+      getOnPushNameChanged: () => this.callbacks.onPushNameChanged,
       getOnDisconnected: () => this.callbacks.onDisconnected,
       getOnReconnecting: () => this.callbacks.onReconnecting,
       getOnError: () => this.callbacks.onError,

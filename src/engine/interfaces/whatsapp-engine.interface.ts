@@ -253,6 +253,10 @@ export interface Contact {
   id: string;
   name?: string;
   pushName?: string;
+  /**
+   * MSISDN digits for a `<phone>@c.us` id. For a `<lid>@lid` id: Baileys gives the phone's digits when the phone is
+   * known and '' when it is not; whatsapp-web.js gives the lid's digits, which are not a phone number.
+   */
   number: string;
   isMyContact: boolean;
   isBlocked: boolean;
@@ -270,6 +274,7 @@ export interface Group {
 
 export interface GroupParticipant {
   id: string;
+  /** MSISDN digits for a `<phone>@c.us` id; the lid's digits (not a phone number) for a `<lid>@lid` id. */
   number: string;
   name?: string;
   isAdmin: boolean;
@@ -940,6 +945,12 @@ export interface EngineEventCallbacks {
   onQRCode?: (qr: string) => void;
   onReady?: (phone: string, pushName: string) => void;
   /**
+   * Fired while ready when the account's own push name becomes known or changes, with the new non-empty
+   * name. Baileys only: a newly linked account's name syncs after the connection opened, so its `onReady`
+   * carried an empty one. whatsapp-web.js knows the name at ready and never fires it.
+   */
+  onPushNameChanged?: (pushName: string) => void;
+  /**
    * Set only where a downloaded payload outlives the emit (PostgreSQL writes asynchronously). The
    * engine calls it synchronously as each live message arrives, in arrival order, and passes the
    * ticket to the emit, or drops it when the message is not emitted. `needsRoom` says whether the
@@ -1537,9 +1548,10 @@ export interface LabelCapability {
   addLabelToChat(chatId: string, labelId: string): Promise<void>;
 
   /**
-   * Create or update a label, keyed on `label.id`. One operation, not two: the engines express both
+   * Create or update a label, keyed on `label.id`. One operation, not two: Baileys expresses both
    * through a single app-state write, and which one happens depends on whether the id already
-   * exists. Only fields that are set are changed.
+   * exists. The write replaces the whole label: a field left unset is not kept (a colour-only write
+   * clears the name). whatsapp-web.js cannot write labels and throws EngineNotSupportedError.
    */
   upsertLabel(label: LabelInput): Promise<void>;
 

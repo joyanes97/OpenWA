@@ -361,11 +361,28 @@ export class BaileysMessaging {
     return this.host.sessionProxyUrl() ? this.queryBudgetMs : undefined;
   }
 
-  /** Post-ensureReady socket handle. */
+  /**
+   * Post-ensureReady socket handle. Read before the write, so its 409 (the socket torn down, or replaced since
+   * `expected` was read) carries markNothingSent.
+   */
   private sock(expected?: WASocket): WASocket {
-    const socket = this.host.getSocket();
-    if (expected && socket !== expected) throw new EngineNotReadyError();
+    let socket: WASocket;
+    try {
+      socket = this.host.getSocket();
+    } catch (error) {
+      throw markNothingSent(error);
+    }
+    if (expected && socket !== expected) throw markNothingSent(new EngineNotReadyError());
     return socket;
+  }
+
+  /** The readiness check that opens a send: nothing is written yet, so its 409 carries markNothingSent. */
+  private ensureReadyToSend(): void {
+    try {
+      this.host.ensureReady();
+    } catch (error) {
+      throw markNothingSent(error);
+    }
   }
 
   /**
@@ -424,7 +441,7 @@ export class BaileysMessaging {
     mentions?: string[],
     sendOptions?: { linkPreview?: boolean; customPreview?: CustomLinkPreview } & Quotable,
   ): Promise<MessageResult> {
-    this.host.ensureReady();
+    this.ensureReadyToSend();
     const jid = await this.toDeliverableJid(chatId);
     // Baileys spreads the caller's options LAST (messages-send.js:1086), so `getUrlInfo` here
     // replaces its hardcoded one — which delegates to a package carrying an unfixed SSRF advisory
@@ -587,7 +604,7 @@ export class BaileysMessaging {
   }
 
   async sendImageMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
-    this.host.ensureReady();
+    this.ensureReadyToSend();
     const { data, mimetype } = await resolveMediaBuffer(media, this.host.sessionProxyUrl(), 'image/jpeg');
     return this.sendContent(
       chatId,
@@ -602,7 +619,7 @@ export class BaileysMessaging {
   }
 
   async sendVideoMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
-    this.host.ensureReady();
+    this.ensureReadyToSend();
     const { data, mimetype } = await resolveMediaBuffer(media, this.host.sessionProxyUrl(), 'video/mp4');
     return this.sendContent(
       chatId,
@@ -617,7 +634,7 @@ export class BaileysMessaging {
   }
 
   async sendAudioMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
-    this.host.ensureReady();
+    this.ensureReadyToSend();
     const { data, mimetype } = await resolveMediaBuffer(media, this.host.sessionProxyUrl(), 'audio/mpeg');
     const ptt = media.ptt ?? false;
     return this.sendContent(
@@ -634,7 +651,7 @@ export class BaileysMessaging {
   }
 
   async sendDocumentMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
-    this.host.ensureReady();
+    this.ensureReadyToSend();
     const { data, mimetype } = await resolveMediaBuffer(media, this.host.sessionProxyUrl(), 'application/octet-stream');
     return this.sendContent(
       chatId,
@@ -678,7 +695,7 @@ export class BaileysMessaging {
   }
 
   async sendStickerMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
-    this.host.ensureReady();
+    this.ensureReadyToSend();
     const { data, mimetype } = await resolveMediaBuffer(media, this.host.sessionProxyUrl());
     // A sticker has neither text nor caption, but stickerMessage carries a contextInfo like every
     // other content type, so a mention still tags the participant. The route accepts the field
@@ -692,7 +709,7 @@ export class BaileysMessaging {
   }
 
   async sendLocationMessage(chatId: string, location: LocationInput): Promise<MessageResult> {
-    this.host.ensureReady();
+    this.ensureReadyToSend();
     return this.sendContent(
       chatId,
       {
@@ -708,7 +725,7 @@ export class BaileysMessaging {
   }
 
   async sendContactMessage(chatId: string, contact: ContactCard): Promise<MessageResult> {
-    this.host.ensureReady();
+    this.ensureReadyToSend();
     return this.sendContent(
       chatId,
       {
@@ -719,7 +736,7 @@ export class BaileysMessaging {
   }
 
   async sendPollMessage(chatId: string, poll: PollInput): Promise<MessageResult> {
-    this.host.ensureReady();
+    this.ensureReadyToSend();
     // selectableCount 1 = single choice; 0 = no limit, which is how WhatsApp expresses
     // "allow multiple answers". Baileys generates the poll's messageSecret itself.
     return this.sendContent(
@@ -736,7 +753,7 @@ export class BaileysMessaging {
   }
 
   async replyToMessage(chatId: string, quotedMsgId: string, text: string, mentions?: string[]): Promise<MessageResult> {
-    this.host.ensureReady();
+    this.ensureReadyToSend();
     const socket = this.sock();
     const quoted = await this.requireStored(quotedMsgId);
     // The one requireStored path that had no chat check. whatsapp-web.js resolves the quote by
@@ -784,7 +801,7 @@ export class BaileysMessaging {
   }
 
   async forwardMessage(fromChatId: string, toChatId: string, messageId: string): Promise<MessageResult> {
-    this.host.ensureReady();
+    this.ensureReadyToSend();
     const socket = this.sock();
     const forward = await this.requireStored(messageId);
     // fromChatId was accepted and then ignored, so a message id from ANY chat forwarded successfully
@@ -942,7 +959,7 @@ export class BaileysMessaging {
         this.queryBudgetMs,
         'WhatsApp did not answer the recipient LID lookup in time',
       );
-      if (this.host.getSocketOrNull() !== sock) throw new EngineNotReadyError();
+      if (this.host.getSocketOrNull() !== sock) throw markNothingSent(new EngineNotReadyError());
       // Record what the socket just told us. This resolution is the one place a cold contact's lid
       // becomes known before any message arrives, and without writing it back the session store
       // still believes the two ids are unrelated — which makes an ownership check comparing the
@@ -950,7 +967,9 @@ export class BaileysMessaging {
       if (lid) this.host.recordLidMapping(`${userPart(lid)}@lid`, pn, false);
       return lid ? `${userPart(lid)}@lid` : pn;
     } catch (error) {
-      if (this.host.getSocketOrNull() !== sock || error instanceof EngineNotReadyError) throw new EngineNotReadyError();
+      if (this.host.getSocketOrNull() !== sock || error instanceof EngineNotReadyError) {
+        throw markNothingSent(new EngineNotReadyError());
+      }
       if (error instanceof EngineTransportError) throw new EngineNotSentError(error.message);
       return pn; // LID resolution is best-effort; the phone destination must still be canonical.
     }
@@ -1209,9 +1228,9 @@ export class BaileysMessaging {
       const lid = requested.kind === 'lid' ? requested.userPart : stored.userPart;
       if (typeof socket.executeUSyncQuery === 'function') {
         const library = await this.host.loadLib();
-        if (this.host.getSocketOrNull() !== socket) throw new EngineNotReadyError();
+        if (this.host.getSocketOrNull() !== socket) throw markNothingSent(new EngineNotReadyError());
         const confirmed = await queryLidPhone(socket, library, phone, lid, this.queryBudgetMs);
-        if (this.host.getSocketOrNull() !== socket) throw new EngineNotReadyError();
+        if (this.host.getSocketOrNull() !== socket) throw markNothingSent(new EngineNotReadyError());
         if (confirmed) {
           this.host.recordLidMapping(`${lid}@lid`, `${phone}@s.whatsapp.net`);
           return;

@@ -189,7 +189,7 @@ authoritative gate. Current policy:
 | `src/core/agent-tools/`     | 88%      | 86%       | 91%   | 91%        |
 | `src/core/hooks/`           | 86%      | 88%       | 91%   | 90%        |
 | `src/core/plugins/`         | 80%      | 81%       | 85%   | 84%        |
-| `src/database/`             | 72%      | 80%       | 82%   | 80%        |
+| `src/database/`             | 73%      | 81%       | 82%   | 80%        |
 | `src/engine/adapters/`      | 84%      | 89%       | 91%   | 90%        |
 | `src/engine/identity/`      | 88%      | 93%       | 95%   | 93%        |
 | `src/modules/audit/`        | 75%      | 63%       | 85%   | 85%        |

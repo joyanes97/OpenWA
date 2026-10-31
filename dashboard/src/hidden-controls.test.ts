@@ -35,6 +35,23 @@ test('the Infrastructure radio inputs stay focusable and the card shows the focu
   assert.match(ring.body, /outline:\s*2px solid var\(--focus-ring\)/);
 });
 
+// The plugin .zip drop zone and the Import data button are labels around a file input. The input is hidden from
+// sight, not removed, so Tab reaches it; the label it sits in shows the focus.
+test('the file inputs under the plugin drop zone and the Import data button stay focusable and ring their label', () => {
+  for (const [file, input, ring] of [
+    ['pages/Plugins.css', /\.install-drop input\[type='file'\]$/, /\.install-drop:has\(input:focus-visible\)$/],
+    ['pages/Infrastructure.css', /\.hidden-file-input$/, /label:has\(> \.hidden-file-input:focus-visible\)$/],
+  ] as const) {
+    const all = rules(file);
+    const inputs = all.filter(r => r.selectors.some(s => input.test(s)));
+    assert.ok(inputs.length > 0, `${file}: no rule styles the file input`);
+    for (const r of inputs) assert.doesNotMatch(r.body, /display:\s*none/, `${file}: ${r.selectors.join(', ')}`);
+    const shown = all.find(r => r.selectors.some(s => ring.test(s)));
+    assert.ok(shown, `${file}: no focus ring for the focused file input`);
+    assert.match(shown.body, /outline:\s*2px solid var\(--focus-ring\)/);
+  }
+});
+
 /** Every stylesheet under src/, as a path relative to src/. */
 function cssFiles(dir = SRC): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {

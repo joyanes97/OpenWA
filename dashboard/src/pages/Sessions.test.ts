@@ -609,6 +609,34 @@ test('Enter in the name field follows the same gate as the Create button', async
   assert.deepEqual(posted(), [{ name: 'enter-bot' }]);
 });
 
+// An input method (pinyin composing Latin letters) commits its text with Enter. That keydown is the input method's: it
+// carries isComposing, or keyCode 229, and must not create the session from the name as it stands.
+test('the Enter that commits an input method composition does not create the session', async () => {
+  const { screen, fireEvent, waitFor, within } = rtl;
+  resetFetchCalls();
+  renderSessions();
+
+  await screen.findByText('new-device');
+  fireEvent.click(screen.getByRole('button', { name: 'New Session' }));
+  const dialog = await screen.findByRole('dialog');
+  const input = within(dialog).getByPlaceholderText('e.g., marketing-bot');
+  const posted = () => fetchCalls.filter(c => c.method === 'POST' && c.path === '/api/sessions').map(c => c.body);
+
+  fireEvent.compositionStart(input);
+  fireEvent.change(input, { target: { value: 'support' } });
+  fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
+  fireEvent.keyDown(input, { key: 'Enter', keyCode: 229 });
+  fireEvent.compositionEnd(input);
+
+  // The operator finishes the name; the Enter pressed outside a composition creates it.
+  fireEvent.change(input, { target: { value: 'support-bot' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+  await waitFor(() => assert.ok(posted().length > 0));
+  assert.deepEqual(posted(), [{ name: 'support-bot' }]);
+  await screen.findByText('support-bot');
+  await waitFor(() => assert.equal(queryClient?.isFetching() ?? 0, 0));
+});
+
 test('opening the proxy modal fetches GET /api/sessions/:id/proxy', async () => {
   const { screen, fireEvent, within, waitFor } = rtl;
   resetFetchCalls();
@@ -823,6 +851,28 @@ test('the pairing phone field keeps a formatted paste whole and refuses one of m
   assert.equal(phoneInput.getAttribute('aria-invalid'), null);
   assert.equal(screen.queryByText(/Enter a valid phone number/) === null, true);
   assert.equal(generate.disabled, false);
+});
+
+// The Enter that commits full-width digits is the input method's: read then, the digits are not yet the ASCII ones the
+// composition end turns them into, and a valid number would be refused.
+test('the Enter that commits a composed pairing phone number neither refuses it nor asks a code', async () => {
+  const { screen, fireEvent, waitFor } = rtl;
+  const { phoneInput } = await openPairingPhoneField();
+  const fullwidth = (ascii: string) => [...ascii].map(d => String.fromCharCode(0xff10 + Number(d))).join('');
+
+  fireEvent.compositionStart(phoneInput);
+  fireEvent.input(phoneInput, { target: { value: fullwidth('6281234567890') }, isComposing: true });
+  fireEvent.keyDown(phoneInput, { key: 'Enter', isComposing: true });
+  fireEvent.keyDown(phoneInput, { key: 'Enter', keyCode: 229 });
+  fireEvent.compositionEnd(phoneInput);
+  assert.equal(phoneInput.value, '6281234567890');
+  assert.equal(screen.queryByText(/Enter a valid phone number/) === null, true, 'the committed number was refused');
+  assert.equal(pairingCodeRequests().length, 0);
+
+  fireEvent.keyDown(phoneInput, { key: 'Enter' });
+  await screen.findByText('1234 - 5678');
+  assert.equal(pairingCodeRequests().length, 1);
+  await waitFor(() => assert.equal(queryClient?.isFetching() ?? 0, 0));
 });
 
 // A pairing code belongs to the connection that was waiting to be linked. When that wait ends (Baileys ends it once a

@@ -481,7 +481,10 @@ export interface Contact {
   id: string;
   name?: string;
   pushName?: string;
-  /** MSISDN digits without separators — always present in the response. */
+  /**
+   * MSISDN digits for a `<phone>@c.us` id. For an `<lid>@lid` id, the lid's digits on whatsapp-web.js, which are
+   * not a phone number, and on Baileys the phone's digits, or '' when the phone is unknown.
+   * Digits only, no separators — always present in the response. */
   number: string;
   isMyContact: boolean;
   isBlocked: boolean;

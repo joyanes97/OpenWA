@@ -97,10 +97,21 @@ const mustReject = [
   // Dependencies (reinstalled via npm ci in the image)
   'node_modules/typescript/package.json',
   'dashboard/node_modules/vite/package.json',
+  'scripts/node_modules/zx/package.json',
   'sdk/javascript/node_modules/typescript/package.json',
   'sdk/php/vendor/autoload.php',
   'sdk/python/.venv/pyvenv.cfg',
   'sdk/java/target/openwa.jar',
+  // The SDKs (no build step reads them): sources, build output and test caches
+  'sdk/javascript/src/index.ts',
+  'sdk/javascript/dist/cjs/index.js',
+  'sdk/python/dist/openwa-0.7.0-py3-none-any.whl',
+  'sdk/python/build/lib/openwa/client.py',
+  'sdk/python/src/openwa.egg-info/PKG-INFO',
+  'sdk/python/src/openwa/__pycache__/client.cpython-312.pyc',
+  'sdk/python/.pytest_cache/v/cache/nodeids',
+  'sdk/php/.phpunit.result.cache',
+  'sdk/go/coverage.out',
   // Build output / local compiler caches
   'dist/main.js',
   'dashboard/dist/index.html',

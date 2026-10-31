@@ -29,6 +29,7 @@ import { useTheme } from '../hooks/useTheme';
 import { useRole, type UserRole } from '../hooks/useRole';
 import { languageOptions, resolveSupportedLanguage, rtlLanguages, type SupportedLanguage } from '../i18n';
 import { healthApi, infraApi } from '../services/api';
+import { isComposingKey } from '../utils/composition';
 import './Layout.css';
 
 interface LayoutProps {
@@ -157,7 +158,7 @@ export function Layout({ onLogout, userRole }: LayoutProps) {
     if (!isMobileOpen || isLanguageMenuOpen) return;
 
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.isComposing) return;
+      if (event.key !== 'Escape' || isComposingKey(event)) return;
       if (document.querySelector('[role="dialog"]')) return;
       event.preventDefault();
       event.stopPropagation();

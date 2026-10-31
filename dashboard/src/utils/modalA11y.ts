@@ -6,6 +6,8 @@
  * The binder is typed against the real DOM (`Document`/`HTMLElement`); tests pass minimal fakes.
  */
 
+import { isComposingKey } from './composition.ts';
+
 const FOCUSABLE =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -51,7 +53,7 @@ export function bindModalA11y(
   const onKeyDown = (event: KeyboardEvent) => {
     if (modalStack[modalStack.length - 1] !== stackEntry) return;
     // An input method takes Escape to cancel the text it is composing; closing on it would drop the form.
-    if (event.key === 'Escape' && !event.isComposing) {
+    if (event.key === 'Escape' && !isComposingKey(event)) {
       // Capture phase: nested widgets (selects, menus) may also listen for Escape — the dialog
       // owns dismissal while it is open.
       event.stopPropagation();

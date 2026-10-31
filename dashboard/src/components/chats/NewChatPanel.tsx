@@ -8,6 +8,7 @@ import { useRole } from '../../hooks/useRole';
 import { useToast } from '../../hooks/useToast';
 import ChatAvatar from './ChatAvatar';
 import { normalizePhoneText, phoneQueryDigits } from '../../utils/phone';
+import { isComposingKey } from '../../utils/composition';
 
 type Mode = 'chat' | 'group';
 
@@ -283,7 +284,7 @@ function NewChatPanel({ sessionId, onOpenChat, findListedChat, onClose }: NewCha
           value={query}
           onChange={e => setQuery(e.target.value)}
           onKeyDown={e => {
-            if (e.key === 'Enter' && typedNumber && !busy) {
+            if (e.key === 'Enter' && !isComposingKey(e.nativeEvent) && typedNumber && !busy) {
               e.preventDefault();
               submitTypedNumber();
             }

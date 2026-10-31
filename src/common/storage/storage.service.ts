@@ -2,7 +2,7 @@ import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
-import { Readable, PassThrough, finished } from 'stream';
+import { Readable, PassThrough, Transform, finished, pipeline } from 'stream';
 import {
   S3Client,
   S3ClientConfig,
@@ -59,16 +59,74 @@ export const S3_PROBE_TIMEOUT_MS = 10_000;
  * connection and never answers (a paused container, a stuck proxy) leaves the request pending
  * forever, holding its media buffer and the caller. The socket bound is an idle timeout, so a long
  * upload or download that keeps moving bytes is not cut off. A bare requestTimeout would not do:
- * the HTTP handler only logs a warning when it expires.
+ * the HTTP handler only logs a warning when it expires. The HTTP handler stops applying the socket
+ * bound once the response headers arrive, so an object body gets the same idle bound in openS3File,
+ * and a listing page S3_LIST_TIMEOUT_MS.
  */
 export const S3_CONNECT_TIMEOUT_MS = 5_000;
 export const S3_SOCKET_TIMEOUT_MS = 30_000;
+
+/**
+ * Cap on one ListObjectsV2 page, the whole request. A page holds at most 1000 keys, a few hundred kilobytes,
+ * so a page that is moving has ample time, while one whose body stalls would hang an orphan sweep for good:
+ * its guarded interval skips every later tick while that run is pending.
+ */
+export const S3_LIST_TIMEOUT_MS = 30_000;
 
 /**
  * Downloads open at once on the stream client, the SDK's pool size. Each holds a pooled socket until its
  * stream finishes; one more would wait for a socket until three connect timeouts failed it, about 15 s.
  */
 export const S3_MAX_OPEN_DOWNLOADS = 50;
+
+/**
+ * How long an S3 download may wait on its reader, from the last chunk that reader let through. An HTTP reader
+ * takes from the body only once the response socket and the kernel buffers on the way to the client have room
+ * again: on Linux, once the client has read about 1.1 MiB (after about 2.7 MiB filled them; about 250 KiB on
+ * macOS), so a client reading 3 to 8 KiB/s pulls every 2 to 6 minutes, and with no Range to resume from a cut
+ * there means a large file never arrives. Ten minutes keeps a client reading about 2 KiB/s or more going; a
+ * reader that stopped holds its download place that long.
+ */
+export const S3_READER_IDLE_MS = 600_000;
+
+/**
+ * Pass an object body on, failing it with a TimeoutError once nothing has come through it for idleMs while it
+ * waits on the store, or for readerIdleMs while its reader holds it back. The reader is behind while the guard's
+ * readable side is full, which also covers the tail once the store has sent the last byte. The timer is cleared
+ * once the whole body has come through, so it only fires while the pipeline still listens for the guard's error.
+ */
+function withIdleBound(body: Readable, idleMs: number, readerIdleMs: number): Readable {
+  // A full readable side can only refill through transform, so this counts from the reader's last take.
+  let heldBackMs = 0;
+  const timer = setTimeout(() => {
+    const readerBehind = guard.readableLength >= guard.readableHighWaterMark;
+    if (readerBehind && (heldBackMs += idleMs) < readerIdleMs) {
+      timer.refresh();
+      return;
+    }
+    const idle = readerBehind ? `reader took nothing for ${heldBackMs} ms` : `body sent nothing for ${idleMs} ms`;
+    guard.destroy(Object.assign(new Error(`S3 object ${idle}`), { name: 'TimeoutError' }));
+  }, idleMs);
+  timer.unref();
+  const guard = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      heldBackMs = 0;
+      timer.refresh();
+      callback(null, chunk);
+    },
+    flush(callback) {
+      clearTimeout(timer);
+      callback();
+    },
+    destroy(error, callback) {
+      clearTimeout(timer);
+      callback(error);
+    },
+  });
+  // pipeline, not pipe: destroying the guard (a client that went away, or the timer) must destroy the body too.
+  pipeline(body, guard, () => undefined);
+  return guard;
+}
 
 @Injectable()
 export class StorageService implements OnModuleDestroy {
@@ -78,8 +136,9 @@ export class StorageService implements OnModuleDestroy {
   private s3Client: S3Client | null = null;
   /**
    * Serves openFile. A stream holds its pooled socket until its reader has taken the whole object, so a slow
-   * HTTP client holds it for its whole download, and a stalled one until the idle timeout. On a pool of their
-   * own, a burst of downloads cannot leave the writes, deletes and listings on s3Client waiting for a socket.
+   * HTTP client holds it for its whole download, a stalled store for S3_SOCKET_TIMEOUT_MS and a stopped reader
+   * for S3_READER_IDLE_MS. On a pool of their own, a burst of downloads cannot leave the writes, deletes and
+   * listings on s3Client waiting for a socket.
    */
   private s3StreamClient: S3Client | null = null;
   private s3OpenDownloads = 0;
@@ -441,6 +500,7 @@ export class StorageService implements OnModuleDestroy {
           Prefix: this.s3KeyRoot,
           ContinuationToken: continuationToken,
         }),
+        { abortSignal: AbortSignal.timeout(S3_LIST_TIMEOUT_MS) },
       );
 
       for (const obj of response.Contents ?? []) {
@@ -546,6 +606,7 @@ export class StorageService implements OnModuleDestroy {
           Prefix: `${this.s3KeyRoot}${prefix}`,
           ContinuationToken: continuationToken,
         }),
+        { abortSignal: AbortSignal.timeout(S3_LIST_TIMEOUT_MS) },
       );
 
       for (const obj of response.Contents ?? []) {
@@ -614,11 +675,12 @@ export class StorageService implements OnModuleDestroy {
       release();
       throw new Error('Empty response body');
     }
-    const stream = response.Body as Readable;
-    // Its socket goes back once the body is read to the end, fails, or is destroyed (a client that went away, or
-    // the idle timeout).
-    finished(stream, release);
-    return { stream, size: response.ContentLength };
+    const body = response.Body as Readable;
+    // Released on the SDK body, which holds the socket: it goes back once the body is read to the end, fails, or
+    // is destroyed (a client that went away, or the idle bound). Released on the guard instead, a reader that
+    // stopped with the last chunks in the guard's buffer would hold the place after the socket went back.
+    finished(body, release);
+    return { stream: withIdleBound(body, S3_SOCKET_TIMEOUT_MS, S3_READER_IDLE_MS), size: response.ContentLength };
   }
 
   private async putS3File(filePath: string, data: Buffer): Promise<void> {

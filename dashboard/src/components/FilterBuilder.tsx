@@ -12,6 +12,7 @@ import {
 import { filterValueLabel } from '../utils/enumLabels';
 import { normalizePhoneText } from '../utils/phone';
 import { MAX_FILTER_CONDITIONS, MAX_FILTER_TEXT_LENGTH } from '../utils/webhookFilters';
+import { isComposingKey } from '../utils/composition';
 import './FilterBuilder.css';
 
 type FieldKind = 'id' | 'idArray' | 'text' | 'enum' | 'boolean';
@@ -151,6 +152,7 @@ function ContactChipsInput({ value, onChange, chats }: ContactChipsInputProps) {
           onChange={e => setText(e.target.value)}
           onFocus={() => setOpen(true)}
           onKeyDown={e => {
+            if (isComposingKey(e.nativeEvent)) return;
             if (e.key === 'Enter') {
               e.preventDefault();
               addTyped();

@@ -22,7 +22,8 @@ Statuses used in the tables:
   **⚠️ `<engine>` only** when the answer depends on the session's engine (the other engine
   answers HTTP 501), **❌ 501** on both engines, and **⚙️ internal** for a method the REST surface
   never exposes: the gateway calls it itself (`probeLiveness`), or no route calls it (`getPhoneNumber`,
-  `getPushName`; a caller reads the session's `phone` and `pushName`, stored from the ready event), or only the
+  `getPushName`; a caller reads the session's `phone` and `pushName`, stored from the ready event, and on Baileys
+  `pushName` again once WhatsApp syncs the account's name after it, as it does for a newly linked account), or only the
   plugin capability bridge calls it (`checkNumberExists`; the REST number check `GET /contacts/check/:number` calls
   `getNumberId`).
 

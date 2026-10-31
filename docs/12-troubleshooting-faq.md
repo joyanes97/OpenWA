@@ -1149,9 +1149,6 @@ npm run migration:show
 # Run all pending migrations
 npm run migration:run
 
-# Rollback last migration
-npm run migration:revert
-
 # Inside the released image, which has no ts-node, use the :prod variants against dist/
 docker compose run --rm openwa-api npm run migration:show:prod
 docker compose run --rm openwa-api npm run migration:run:prod
@@ -1161,6 +1158,8 @@ docker compose run --rm openwa-api npm run migration:run:prod
 npm run migration:run:main
 npm run migration:run:main:prod   # inside the released image
 ```
+
+A failed migration is not recorded: the run executes in one transaction, so the failure rolls back that migration and the rest of the same run, and `migration:show` still lists them as pending. Fix what made it fail and run the migrations again; do not run `migration:revert` for it, which runs the `down()` of the newest migration that succeeded, a downgrade step ([14.6](./14-migration-guide.md#146-rollback-procedures)) that can delete data.
 
 **PostgreSQL crash-loop on boot after upgrade** — if logs show `column "id" is of type uuid but default expression is of type character varying` or `foreign key constraint ... cannot be implemented ... incompatible types: character varying and uuid`, the deployment was previously bootstrapped with `DATABASE_SYNCHRONIZE=true` (native `uuid` columns vs the migrations' `varchar`). A guard migration converts the columns automatically on the next boot; for large `messages` tables, run the migration against the stopped app (`npm run migration:run` from a source checkout, `npm run migration:run:prod` in the image) during a maintenance window. See [14.5 / 14.9 — PostgreSQL crash-loop after upgrading a `DATABASE_SYNCHRONIZE=true` deployment](./14-migration-guide.md). `DATABASE_SYNCHRONIZE=true` is unsupported on PostgreSQL for production.
 

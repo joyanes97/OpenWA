@@ -1,6 +1,9 @@
 import { globSync } from 'glob';
 import dataDataSource, { postgresDataSourceOptions, buildPostgresDataSourceOptions } from './data-source';
 
+// Keep the checkout's own .env and data/.env.generated out: the CLI data sources load them on import.
+jest.mock('./load-cli-env', () => ({ loadCliEnv: jest.fn() }));
+
 // The data CLI DataSource manages the DATA connection's migrations (session/webhook/message/
 // template/engine). It must NOT pull in the auth/audit entities — those belong to the always-SQLite
 // MAIN connection (data-source-main.ts). A broad '**' entity glob would sweep the main-owned

@@ -11,6 +11,7 @@ import { useRole } from '../../hooks/useRole';
 import { useToast } from '../../hooks/useToast';
 import type { ScrollDirection } from '../../utils/scrollDecision';
 import { MEDIA_UPLOAD_MAX_BYTES } from '../../utils/mediaUpload';
+import { isComposingKey } from '../../utils/composition';
 
 // Map an attachment MIME type to the neutral MessageType for the optimistic outgoing bubble, so the
 // placeholder matches what the backend will persist (e.g. a PDF is `document`, not `application`).
@@ -37,6 +38,8 @@ interface ChatComposerProps {
   onMessageAppended: (direction: ScrollDirection) => void;
   /** Moves the chat to the top of the sidebar, if `sessionId` is still the session on screen. */
   onSent: (sessionId: string, chatId: string, snippet: string, sentAt: number) => void;
+  /** A send was confirmed: the placeholder `tempId` is now the thread row keyed `key` (its waMessageId ?? id). */
+  onSendConfirmed?: (tempId: string, key: string) => void;
   messageInput: string;
   setMessageInput: Dispatch<SetStateAction<string>>;
   attachment: StagedAttachment | null;
@@ -56,6 +59,7 @@ function ChatComposer({
   setReplyingTo,
   onMessageAppended,
   onSent,
+  onSendConfirmed,
   messageInput,
   setMessageInput,
   attachment,
@@ -108,7 +112,7 @@ function ChatComposer({
   useEffect(() => {
     if (!showEmojiPicker) return;
     const dismissOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented) return;
+      if (event.key !== 'Escape' || isComposingKey(event) || event.defaultPrevented) return;
       if (document.querySelector('[role="dialog"], [role="menu"]')) return;
       event.preventDefault();
       setShowEmojiPicker(false);
@@ -300,6 +304,7 @@ function ChatComposer({
         status: 'sent',
       };
       upsertCachedMessage(queryClient, sendKey, reconciled, { dropId: tempId });
+      onSendConfirmed?.(tempId, reconciled.waMessageId ?? reconciled.id);
 
       // Update sidebar chat list (move active chat to the top with the new snippet)
       // Named by the type the bubble uses, not the MIME major type: a PDF is a document, not "application".

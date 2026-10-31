@@ -1021,14 +1021,15 @@ timeouts.
 **Solution:**
 
 ```bash
-# Check migration status
+# Check migration status: the failed migration is still listed as pending
 npm run migration:show
-
-# Revert last migration
-npm run migration:revert
 ```
 
-Then fix the failing migration by hand so it skips what already exists, as the idempotent migrations
+A failed migration is not recorded: the run executes in one transaction on SQLite and PostgreSQL, so
+the failure rolls back that migration and the rest of the same run, and there is nothing to revert.
+Do not run `migration:revert` for it: that runs the `down()` of the newest migration that succeeded,
+a downgrade step ([14.6](./14-migration-guide.md#146-rollback-procedures)) that can delete data.
+Fix the failing migration by hand so it skips what already exists, as the idempotent migrations
 in `src/database/migrations/` do, and run `npm run migration:run` again. Do not regenerate it with
 `migration:generate`: on PostgreSQL the command stops before it writes anything (the generated
 `messages.body_ts` column sends TypeORM to a `typeorm_metadata` table no migration creates), and on

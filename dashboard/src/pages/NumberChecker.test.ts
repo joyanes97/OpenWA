@@ -575,6 +575,27 @@ test('NumberChecker: a finished single check is announced through a status regio
   assert.match(region.textContent ?? '', /\+6581234567.*Registered on WhatsApp/);
 });
 
+// The Enter that commits an input method composition (isComposing, or keyCode 229) is the input method's: the number
+// is checked on the Enter pressed once it is typed.
+test('NumberChecker: the Enter that commits an input method composition does not run the check', async () => {
+  const lookups = stubLookups(registered);
+  renderComponent();
+  await rtl.screen.findByRole('option', { name: /Primary Session/ });
+  const field = rtl.screen.getByLabelText('Phone Number');
+
+  rtl.fireEvent.compositionStart(field);
+  rtl.fireEvent.change(field, { target: { value: '6281234567' } });
+  rtl.fireEvent.keyDown(field, { key: 'Enter', isComposing: true });
+  rtl.fireEvent.keyDown(field, { key: 'Enter', keyCode: 229 });
+  rtl.fireEvent.compositionEnd(field);
+
+  rtl.fireEvent.change(field, { target: { value: '6281234567890' } });
+  rtl.fireEvent.keyDown(field, { key: 'Enter' });
+  await rtl.waitFor(() => assert.ok(lookups.length > 0));
+  assert.deepEqual(lookups, ['6281234567890']);
+  await rtl.screen.findByText('Registered on WhatsApp');
+});
+
 test('NumberChecker: the Start and Export buttons wrap onto another row instead of running past a narrow screen', async () => {
   stubLookups(registered);
   const { container } = renderComponent();

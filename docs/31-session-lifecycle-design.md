@@ -113,7 +113,8 @@ row that no node holds and that still has an active status: a row no node holds 
 neither `markLapsedDisconnected` nor the adoption sweep, so the READY a vanished node left on it would
 otherwise stand until a boot, and any claim since sets `nodeId`, so a row B claimed matches nothing.
 **Pinned by:** `src/modules/takeover/session-takeover.service.spec.ts` +
-`session-ownership.service.spec.ts` + `session-ownership-status-fence.spec.ts` + the real-database
+`session-ownership.service.spec.ts` + `session-ownership-status-fence.spec.ts` +
+`session-failed-write-ownership-fence.spec.ts` for the FAILED writers outside the wiring + the real-database
 predicate spec for `markLapsedDisconnected` in `src/modules/session/session.service.spec.ts` +
 `session-retired-start-leaves-peer-row.spec.ts` for the retired launch +
 `session-init-timeout-after-lease-loss.spec.ts` for the init deadline +
@@ -196,7 +197,9 @@ What still holds, and is load-bearing, is the narrower claim: no reconnect ATTEM
 Only the exhaustion of the whole chain does. A loop that marked each failed attempt would turn every
 transient network blip into an operator-visible terminal state and defeat INV-7's signal. All five
 paths are fenced on `ownsSession`, so a dying generation cannot park a peer's session in a status
-nothing resets automatically.
+nothing resets automatically. The two wiring paths (2 and 3) share one fence, pinned by
+`session-ownership-status-fence.spec.ts`; the other three are pinned by
+`session-failed-write-ownership-fence.spec.ts`, which drives the real lifecycle.
 
 ## 31.3 Comments that exist because the obvious fix is wrong
 

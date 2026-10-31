@@ -18,7 +18,12 @@ export class GroupParticipantDto {
   })
   id!: string;
 
-  @ApiProperty({ description: 'MSISDN digits, without a leading + or separators.', example: '628123456789' })
+  @ApiProperty({
+    description:
+      'MSISDN digits, without a leading + or separators, for a `<phone>@c.us` participant. For a `<lid>@lid` ' +
+      "participant it carries the lid's digits on both engines, which are not a phone number.",
+    example: '628123456789',
+  })
   number!: string;
 
   @ApiPropertyOptional({ description: 'Display name, when the engine reports one.', example: 'Ada Lovelace' })

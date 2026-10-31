@@ -105,8 +105,8 @@ describe('StorageService S3 download once every pooled socket is held by a slow 
   });
 
   it('serves the next download, or refuses it as a retryable 503, rather than failing it as a server error', async () => {
-    // Each holds its socket for the 30 s idle timeout, and a client that keeps reading slowly holds it for its
-    // whole download.
+    // Each holds its socket until it has gone unread for the reader bound, and a client that keeps
+    // reading slowly holds it for its whole download.
     await holdEveryPlace();
 
     const startedAt = Date.now();

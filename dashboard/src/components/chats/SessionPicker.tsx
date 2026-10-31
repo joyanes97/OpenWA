@@ -7,6 +7,7 @@ import { useProfilePicture } from '../../hooks/useProfilePicture';
 import { formatPhoneForDisplay } from '../../utils/formatPhone';
 import { flagOfRegion, regionOfPhone } from '../../utils/phoneCountry';
 import { phoneQueryDigits } from '../../utils/phone';
+import { isComposingKey } from '../../utils/composition';
 
 interface SessionPickerProps {
   /** Every session the gateway lists; only a ready one can be picked. */
@@ -150,7 +151,7 @@ function SessionPicker({ sessions, selectedSessionId, onSelectSession, canAddSes
       setQuery('');
     };
     const onEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented) return;
+      if (event.key !== 'Escape' || isComposingKey(event) || event.defaultPrevented) return;
       event.preventDefault();
       setOpen(false);
       setQuery('');

@@ -77,6 +77,7 @@ import { createTrailingCoalescer } from '../utils/trailingCoalescer';
 import { createReloadCoalescer, type ReloadCoalescer } from '../utils/reloadCoalescer';
 import { copyToClipboard } from '../utils/clipboard';
 import { statusFontStyle } from '../utils/statusFonts';
+import { isComposingKey } from '../utils/composition';
 import MessageBody from '../components/chats/MessageBody';
 import MediaLightbox, { type LightboxItem } from '../components/chats/MediaLightbox';
 import ChatAvatar from '../components/chats/ChatAvatar';
@@ -318,8 +319,10 @@ export function Chats() {
 
   // The media viewer holds the message it shows by the key the thread merges by (waMessageId ?? id, kept when a refetch
   // swaps a live row for its stored one), never by list position: the image list is rebuilt from the live thread. An
-  // image still being sent is held under its placeholder's temp_ id; the confirmed row that replaces it keeps the
-  // placeholder's createdAt (ChatComposer spreads it), which is how the viewer follows it to its real key.
+  // image still being sent is held under its placeholder's temp_ id, and ChatComposer reports the real key once the
+  // send is confirmed (an echo of the send can restamp the row's createdAt before the page draws it). A viewer
+  // opened on the placeholder after that report finds the confirmed row by the placeholder's createdAt, which the
+  // composer spreads into it.
   const [lightbox, setLightbox] = useState<ViewedImage | null>(null);
 
   const [replyingTo, setReplyingTo] = useState<ChatMessageView | null>(null);
@@ -1859,7 +1862,7 @@ export function Chats() {
       if (!roomMenuRef.current?.contains(event.target as Node)) setRoomMenuOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented) return;
+      if (event.key !== 'Escape' || isComposingKey(event) || event.defaultPrevented) return;
       event.preventDefault();
       closeRoomMenu();
     };
@@ -1901,7 +1904,7 @@ export function Chats() {
   // still being committed by an IME, is left alone for the same reason.
   useEffect(() => {
     const closeOpenViewOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+      if (event.key !== 'Escape' || event.defaultPrevented || isComposingKey(event)) return;
       if (document.querySelector('[role="dialog"], [role="menu"]')) return;
       if (activeStatusContactId !== null) setActiveStatusContactId(null);
       else if (activeChannel) setActiveChannel(null);
@@ -2204,6 +2207,7 @@ export function Chats() {
                   setReplyingTo={setReplyingTo}
                   onMessageAppended={onMessageAppended}
                   onSent={promoteSentChat}
+                  onSendConfirmed={(tempId, key) => setLightbox(v => (v?.key === tempId ? { ...v, key } : v))}
                   messageInput={messageInput}
                   setMessageInput={setMessageInput}
                   attachment={attachment}

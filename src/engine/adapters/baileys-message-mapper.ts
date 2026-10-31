@@ -983,11 +983,10 @@ export function extractBaileysContext(content: BaileysContextContent): BaileysMe
   };
 
   if (contextInfo?.quotedMessage && contextInfo.stanzaId) {
-    // The quote's body comes from the SAME extractor as the live message, so a quoted contact card,
-    // poll or interactive shape carries its text instead of an empty string — matching wwjs, whose
-    // quote is a full Message and therefore shows the same body it would show unquoted.
-    const qm = contextInfo.quotedMessage as BaileysBodyContent;
-    context.quotedMessage = { id: contextInfo.stanzaId, body: extractBaileysBody(qm) };
+    // The quote's body is the text the quoted message is announced with ({@link baileysMessageText}), so a
+    // quoted contact card, poll, interactive shape or native-flow reply carries its text instead of an empty
+    // string. That matches wwjs, whose quote is a full Message and shows the same body it would show unquoted.
+    context.quotedMessage = { id: contextInfo.stanzaId, body: baileysMessageText(contextInfo.quotedMessage) };
   }
 
   return context;
